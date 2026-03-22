@@ -336,7 +336,10 @@ class MessageRouter:
         decoded = _decode_fixed(PayloadMagCalStatus, tlv_data)
         if decoded is None:
             return None
-        return [self._wrap("sensor_mag_cal_status", decoded)]
+        message = self._wrap("sensor_mag_cal_status", decoded)
+        message["data"].update(self._mag_cal_controller.get_ui_status())
+        self._latest_ws_messages["sensor_mag_cal_status"] = message
+        return [message]
 
     def _decode_io_input_state(self, tlv_data: bytes) -> DecodedMessages:
         decoded = _decode_fixed(PayloadIOInputState, tlv_data)

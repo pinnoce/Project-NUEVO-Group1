@@ -207,15 +207,15 @@ def fit_soft_iron_calibration(samples: Sequence[Tuple[float, float, float]]) -> 
 
 
 class MagCalibrationController:
-    MIN_SAMPLES = 250
+    MIN_SAMPLES = 200
     MIN_DURATION_S = 6.0
     MAX_DURATION_S = 30.0
-    MIN_AXIS_SPAN_UT = 12.0
-    MIN_AXIS_RATIO = 0.30
+    MIN_AXIS_SPAN_UT = 10.0
+    MIN_AXIS_RATIO = 0.25
     SPAN_GROWTH_EPS_UT = 0.5
     FIT_RETRY_INTERVAL_S = 0.5
-    MAX_STD_RATIO = 0.35
-    TIMEOUT_STD_RATIO = 0.50
+    MAX_STD_RATIO = 0.55
+    TIMEOUT_STD_RATIO = 0.90
     MAX_SAMPLES = 4096
 
     def __init__(self, sender: Optional[Callable[[str, dict], bool]] = None):
@@ -242,6 +242,7 @@ class MagCalibrationController:
         self._last_fit_attempt_time = 0.0
         self._best_result: Optional[MagCalibrationResult] = None
         self._best_std_ratio = math.inf
+        self._last_std_ratio = math.inf
 
     def _observe_status(self, data: dict) -> None:
         state = int(data.get("state", 0))
@@ -257,6 +258,7 @@ class MagCalibrationController:
                 self._last_fit_attempt_time = 0.0
                 self._best_result = None
                 self._best_std_ratio = math.inf
+                self._last_std_ratio = math.inf
             return
 
         if self._sampling and state in (0, 3, 4):
@@ -313,15 +315,18 @@ class MagCalibrationController:
         result = fit_soft_iron_calibration(self._samples)
         if result is not None and result.mean_norm > 1e-6:
             std_ratio = result.std_norm / result.mean_norm
+            self._last_std_ratio = std_ratio
             if std_ratio < self._best_std_ratio:
                 self._best_std_ratio = std_ratio
                 self._best_result = result
             if std_ratio <= self.MAX_STD_RATIO:
                 self._apply_result(result)
                 return
+        else:
+            self._last_std_ratio = math.inf
 
         if elapsed >= self.MAX_DURATION_S:
-            if self._best_result is not None and self._best_std_ratio <= self.TIMEOUT_STD_RATIO:
+            if self._best_result is not None:
                 self._apply_best_result()
             else:
                 self._send_command("sensor_mag_cal_cmd", {"command": 2})
@@ -341,6 +346,48 @@ class MagCalibrationController:
     def _apply_best_result(self) -> None:
         if self._best_result is not None:
             self._apply_result(self._best_result)
+
+    def get_ui_status(self) -> dict:
+        sample_count = len(self._samples)
+        spans = [
+            0.0 if not math.isfinite(self._min[idx]) or not math.isfinite(self._max[idx])
+            else (self._max[idx] - self._min[idx])
+            for idx in range(3)
+        ]
+        max_span = max(spans) if spans else 0.0
+        min_span = min(spans) if spans else 0.0
+
+        sample_progress = min(sample_count / self.MIN_SAMPLES, 1.0) if self.MIN_SAMPLES > 0 else 1.0
+        span_progress = min(min_span / self.MIN_AXIS_SPAN_UT, 1.0) if self.MIN_AXIS_SPAN_UT > 0 else 1.0
+        ratio_progress = 0.0
+        if max_span > 1e-6 and self.MIN_AXIS_RATIO > 0:
+            ratio_progress = min((min_span / max_span) / self.MIN_AXIS_RATIO, 1.0)
+
+        fit_progress = 0.0
+        fit_quality = None
+        if math.isfinite(self._best_std_ratio):
+            fit_quality = self._best_std_ratio
+            if self.TIMEOUT_STD_RATIO > 1e-6:
+                fit_progress = max(0.0, min(1.0, 1.0 - (self._best_std_ratio / self.TIMEOUT_STD_RATIO)))
+
+        progress = int(round((sample_progress * 0.35 + span_progress * 0.35 + ratio_progress * 0.15 + fit_progress * 0.15) * 100.0))
+        ready = (
+            sample_progress >= 1.0 and
+            span_progress >= 1.0 and
+            ratio_progress >= 1.0 and
+            math.isfinite(self._best_std_ratio) and
+            self._best_std_ratio <= self.MAX_STD_RATIO
+        )
+
+        return {
+            "bridgeProgress": progress,
+            "bridgeReady": ready,
+            "bridgeSampleProgress": sample_progress,
+            "bridgeSpanProgress": span_progress,
+            "bridgeRatioProgress": ratio_progress,
+            "bridgeFitProgress": fit_progress,
+            "bridgeBestStdRatio": fit_quality,
+        }
 
     def _send_command(self, cmd: str, data: dict) -> bool:
         if self._sender is None:
