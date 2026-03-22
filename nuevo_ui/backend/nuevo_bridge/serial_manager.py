@@ -36,18 +36,34 @@ from .config import (
 )
 from .payloads import (
     PayloadHeartbeat, PayloadSysCmd,
-    PayloadSystemStatus, PayloadDCStatusAll, PayloadStepStatusAll,
-    PayloadServoStatusAll, PayloadSensorIMU, PayloadSensorKinematics,
-    PayloadSensorVoltage, PayloadSensorRange, PayloadIOStatus,
-    DCMotorStatus, StepperStatus,
+    PayloadSysState, PayloadSysInfoRsp, PayloadSysConfigRsp, PayloadSysConfigSet,
+    PayloadSysPower, PayloadSysDiagRsp, PayloadSysOdomReset,
+    PayloadDCStateAll, PayloadDCPidReq, PayloadDCPidRsp,
+    PayloadStepStateAll, PayloadStepConfigReq, PayloadStepConfigRsp,
+    PayloadServoStateAll, PayloadSensorIMU, PayloadSensorKinematics,
+    PayloadSensorUltrasonicAll, PayloadIOInputState, PayloadIOOutputState,
 )
 from .TLV_TypeDefs import (
-    SYS_HEARTBEAT, SYS_CMD, SYS_STATUS, SYS_CONFIG, SYS_SET_PID,
+    SYS_HEARTBEAT, SYS_CMD,
+    SYS_STATE,
+    SYS_INFO_REQ, SYS_INFO_RSP,
+    SYS_CONFIG_REQ, SYS_CONFIG_RSP, SYS_CONFIG_SET,
+    SYS_POWER,
+    SYS_DIAG_REQ, SYS_DIAG_RSP,
+    SYS_ODOM_RESET,
+    DC_PID_REQ, DC_PID_RSP, DC_PID_SET,
     DC_ENABLE, DC_SET_VELOCITY, DC_SET_POSITION, DC_SET_PWM,
-    DC_STATUS_ALL, STEP_ENABLE, STEP_SET_PARAMS, STEP_MOVE, STEP_HOME,
-    STEP_STATUS_ALL, SERVO_ENABLE, SERVO_SET, SERVO_STATUS_ALL,
-    SENSOR_IMU, SENSOR_KINEMATICS, SENSOR_VOLTAGE, SENSOR_RANGE,
-    IO_SET_LED, IO_SET_NEOPIXEL, IO_STATUS,
+    DC_STATE_ALL,
+    STEP_ENABLE,
+    STEP_CONFIG_REQ, STEP_CONFIG_RSP, STEP_CONFIG_SET,
+    STEP_MOVE, STEP_HOME,
+    STEP_STATE_ALL,
+    SERVO_ENABLE, SERVO_SET,
+    SERVO_STATE_ALL,
+    SENSOR_IMU, SENSOR_KINEMATICS,
+    SENSOR_ULTRASONIC_ALL,
+    IO_SET_LED, IO_SET_NEOPIXEL,
+    IO_INPUT_STATE, IO_OUTPUT_STATE,
 )
 
 import sys
@@ -159,9 +175,13 @@ class SerialManager:
         # Accumulate decoded messages; flushed together after decoder.decode() returns,
         # producing one asyncio schedule + one ROS2 publish loop per serial read batch.
         for tlv_type, tlv_len, tlv_data in tlv_list:
-            msg = self.message_router.decode_incoming(tlv_type, tlv_data)
-            if msg is not None:
-                self._pending_messages.append(msg)
+            decoded = self.message_router.decode_incoming(tlv_type, tlv_data)
+            if decoded is None:
+                continue
+            if isinstance(decoded, list):
+                self._pending_messages.extend(decoded)
+            else:
+                self._pending_messages.append(decoded)
 
     def _flush_pending(self) -> None:
         """
@@ -514,7 +534,8 @@ class _ArduinoSim:
         self.heartbeat_timeout_ms = 500
         self.limit_switch_mask = 0
         self.stepper_home_limit = [0xFF, 0xFF, 0xFF, 0xFF]
-        self.attached_sensors  = 0x07   # IMU + Lidar + Ultrasonic present
+        self.sensor_capability_mask = 0x03  # IMU + ultrasonic on Arduino
+        self.feature_mask = 0x0F
 
         self.dc = [_DC() for _ in range(4)]
         self.steppers = [_Stepper() for _ in range(4)]
@@ -537,6 +558,7 @@ class _ArduinoSim:
         self.servo_rail_mv = 0.0
 
         self.button_mask   = 0
+        self.limit_mask    = 0
         self.led_brightness = [0, 0, 0, 0, 0]
         self.neopixel_rgb  = [0, 0, 30]
 
@@ -634,10 +656,12 @@ class MockSerialManager:
     asyncio.run_coroutine_threadsafe() instead — see above.
     """
 
-    _TICK_SYS_STATUS_IDLE    = 100  # 1 Hz  (base rate 100 Hz)
-    _TICK_SYS_STATUS_RUNNING = 10   # 10 Hz
-    _TICK_VOLTAGE            = 10   # 10 Hz
-    _TICK_FULL               = 5    # 20 Hz (DC, step, servo, IMU, kin, IO)
+    _TICK_SYS_STATE_IDLE     = 100  # 1 Hz  (base rate 100 Hz)
+    _TICK_SYS_STATE_RUNNING  = 10   # 10 Hz
+    _TICK_SYS_POWER_IDLE     = 100  # 1 Hz
+    _TICK_SYS_POWER_RUNNING  = 10   # 10 Hz
+    _TICK_RUNTIME_FAST       = 2    # 50 Hz (DC, step, IO input, IMU, kin, ultra)
+    _TICK_RUNTIME_SLOW       = 10   # 10 Hz (servo, IO output)
 
     def __init__(self, message_router, ws_manager):
         self.message_router = message_router
@@ -707,15 +731,37 @@ class MockSerialManager:
                 a.neopixel_rgb = [60, 0, 0]
                 print("[Mock] Arduino → ESTOP")
 
-        elif tlv_type == SYS_CONFIG:
+        elif tlv_type == SYS_INFO_REQ:
+            self._gen_sys_info_rsp()
+
+        elif tlv_type == SYS_CONFIG_REQ:
+            self._gen_sys_config_rsp()
+
+        elif tlv_type == SYS_DIAG_REQ:
+            self._gen_sys_diag_rsp()
+
+        elif tlv_type == SYS_CONFIG_SET:
             if a.state == _SYS_IDLE:
+                if payload.motorDirChangeMask:
+                    keep_mask = a.motor_dir_mask & ~payload.motorDirChangeMask
+                    apply_mask = payload.motorDirMask & payload.motorDirChangeMask
+                    a.motor_dir_mask = keep_mask | apply_mask
+                if payload.neoPixelCount:
+                    a.neopixel_count = payload.neoPixelCount
+                if payload.configuredSensorMask:
+                    a.sensor_capability_mask = payload.configuredSensorMask
                 if payload.heartbeatTimeoutMs:
                     a.heartbeat_timeout_ms = payload.heartbeatTimeoutMs
-                if payload.resetOdometry:
-                    a.odom_x = a.odom_y = a.odom_theta = 0.0
-                    print("[Mock] Odometry reset")
+            self._gen_sys_config_rsp()
 
-        elif tlv_type == SYS_SET_PID:
+        elif tlv_type == SYS_ODOM_RESET:
+            a.odom_x = a.odom_y = a.odom_theta = 0.0
+            print("[Mock] Odometry reset")
+
+        elif tlv_type == DC_PID_REQ:
+            self._gen_dc_pid_rsp(payload.motorId, payload.loopType)
+
+        elif tlv_type == DC_PID_SET:
             mid = payload.motorId
             if 0 <= mid < 4:
                 m = a.dc[mid]
@@ -727,6 +773,7 @@ class MockSerialManager:
                     m.kp_vel = payload.kp
                     m.ki_vel = payload.ki
                     m.kd_vel = payload.kd
+                self._gen_dc_pid_rsp(mid, payload.loopType)
 
         elif tlv_type == DC_ENABLE:
             mid = payload.motorId
@@ -760,11 +807,15 @@ class MockSerialManager:
                     a.steppers[sid].speed = 0.0
                     a.steppers[sid].state = _STEP_IDLE
 
-        elif tlv_type == STEP_SET_PARAMS:
+        elif tlv_type == STEP_CONFIG_REQ:
+            self._gen_step_config_rsp(payload.stepperId)
+
+        elif tlv_type == STEP_CONFIG_SET:
             sid = payload.stepperId
             if 0 <= sid < 4:
                 a.steppers[sid].max_speed = payload.maxVelocity
                 a.steppers[sid].accel     = payload.acceleration
+                self._gen_step_config_rsp(sid)
 
         elif tlv_type == STEP_MOVE:
             sid = payload.stepperId
@@ -816,35 +867,67 @@ class MockSerialManager:
         self.message_router.handle_incoming(tlv_type, raw_bytes)
         self.stats["rx_count"] += 1
 
-    def _gen_sys_status(self):
+    def _gen_sys_state(self):
         a = self.arduino
-        p = PayloadSystemStatus()
-        p.firmwareMajor = a.FIRMWARE_VERSION[0]
-        p.firmwareMinor = a.FIRMWARE_VERSION[1]
-        p.firmwarePatch = a.FIRMWARE_VERSION[2]
+        p = PayloadSysState()
         p.state           = a.state
         p.uptimeMs        = (a.uptime_us // 1000) & 0xFFFFFFFF
         p.lastRxMs        = a.last_rx_ms
         p.lastCmdMs       = a.last_cmd_ms
-        p.batteryMv       = int(_clamp(a.battery_mv, 0, 65535))
-        p.rail5vMv        = int(_clamp(a.rail5v_mv, 0, 65535))
+        p.warningFlags    = 0
         p.errorFlags      = a.error_flags
-        p.attachedSensors = a.attached_sensors
-        p.freeSram        = a.free_sram
-        p.loopTimeAvgUs   = a.loop_avg_us
-        p.loopTimeMaxUs   = a.loop_max_us
-        p.uartRxErrors    = 0
-        p.motorDirMask    = a.motor_dir_mask
-        p.neoPixelCount   = a.neopixel_count
-        p.heartbeatTimeoutMs = a.heartbeat_timeout_ms
+        p.runtimeFlags    = 0x03  # link OK + I2C OK
+        self._emit(SYS_STATE, p)
+
+    def _gen_sys_info_rsp(self):
+        a = self.arduino
+        p = PayloadSysInfoRsp()
+        p.firmwareMajor = a.FIRMWARE_VERSION[0]
+        p.firmwareMinor = a.FIRMWARE_VERSION[1]
+        p.firmwarePatch = a.FIRMWARE_VERSION[2]
+        p.protocolMajor = 4
+        p.protocolMinor = 0
+        p.boardRevision = 0
+        p.featureMask = a.feature_mask
+        p.sensorCapabilityMask = a.sensor_capability_mask
+        p.dcMotorCount = 4
+        p.stepperCount = 4
+        p.servoChannelCount = 16
+        p.ultrasonicMaxCount = 4
+        p.userLedCount = 5
+        p.maxNeoPixelCount = a.neopixel_count
         p.limitSwitchMask = a.limit_switch_mask
         for i in range(4):
             p.stepperHomeLimitGpio[i] = a.stepper_home_limit[i]
-        self._emit(SYS_STATUS, p)
+        self._emit(SYS_INFO_RSP, p)
+
+    def _gen_sys_config_rsp(self):
+        a = self.arduino
+        p = PayloadSysConfigRsp()
+        p.motorDirMask = a.motor_dir_mask
+        p.configuredSensorMask = a.sensor_capability_mask
+        p.neoPixelCount = a.neopixel_count
+        p.heartbeatTimeoutMs = a.heartbeat_timeout_ms
+        self._emit(SYS_CONFIG_RSP, p)
+
+    def _gen_sys_diag_rsp(self):
+        a = self.arduino
+        p = PayloadSysDiagRsp()
+        p.freeSram = a.free_sram
+        p.loopTimeAvgUs = a.loop_avg_us
+        p.loopTimeMaxUs = a.loop_max_us
+        p.uartRxErrors = 0
+        p.crcErrors = 0
+        p.frameErrors = 0
+        p.tlvErrors = 0
+        p.oversizeErrors = 0
+        p.txPendingBytes = 0
+        p.txDroppedFrames = 0
+        self._emit(SYS_DIAG_RSP, p)
 
     def _gen_dc_status_all(self):
         a = self.arduino
-        p = PayloadDCStatusAll()
+        p = PayloadDCStateAll()
         for i in range(4):
             m  = a.dc[i]
             ms = p.motors[i]
@@ -856,35 +939,64 @@ class MockSerialManager:
             ms.targetVel = m.target_vel if m.mode == _DC_VELOCITY else 0
             ms.pwmOutput = m.pwm
             ms.currentMa = int(_clamp(m.current_ma, 0, 32767))
-            ms.posKp = m.kp_pos;  ms.posKi = m.ki_pos;  ms.posKd = m.kd_pos
-            ms.velKp = m.kp_vel;  ms.velKi = m.ki_vel;  ms.velKd = m.kd_vel
-        self._emit(DC_STATUS_ALL, p)
+        p.timestamp = a.uptime_us & 0xFFFFFFFF
+        self._emit(DC_STATE_ALL, p)
+
+    def _gen_dc_pid_rsp(self, motor_id: int, loop_type: int):
+        a = self.arduino
+        if not (0 <= motor_id < 4):
+            return
+        p = PayloadDCPidRsp()
+        p.motorId = motor_id
+        p.loopType = loop_type
+        motor = a.dc[motor_id]
+        if loop_type == 0:
+            p.kp = motor.kp_pos
+            p.ki = motor.ki_pos
+            p.kd = motor.kd_pos
+        else:
+            p.kp = motor.kp_vel
+            p.ki = motor.ki_vel
+            p.kd = motor.kd_vel
+        p.maxOutput = 0.0
+        p.maxIntegral = 0.0
+        self._emit(DC_PID_RSP, p)
 
     def _gen_step_status_all(self):
         a = self.arduino
-        p = PayloadStepStatusAll()
+        p = PayloadStepStateAll()
         for i in range(4):
             s  = a.steppers[i]
             ss = p.steppers[i]
             ss.enabled        = 1 if s.enabled else 0
             ss.motionState    = s.state
-            ss.limitHit       = s.limit_hit
-            ss.commandedCount = int(s.position)
+            ss.limitFlags     = s.limit_hit
+            ss.count          = int(s.position)
             ss.targetCount    = int(s.target)
             ss.currentSpeed   = int(s.speed)
-            ss.maxSpeed       = s.max_speed
-            ss.acceleration   = s.accel
-        self._emit(STEP_STATUS_ALL, p)
+        p.timestamp = a.uptime_us & 0xFFFFFFFF
+        self._emit(STEP_STATE_ALL, p)
+
+    def _gen_step_config_rsp(self, stepper_id: int):
+        a = self.arduino
+        if not (0 <= stepper_id < 4):
+            return
+        p = PayloadStepConfigRsp()
+        p.stepperId = stepper_id
+        p.maxVelocity = a.steppers[stepper_id].max_speed
+        p.acceleration = a.steppers[stepper_id].accel
+        self._emit(STEP_CONFIG_RSP, p)
 
     def _gen_servo_status_all(self):
         a = self.arduino
-        p = PayloadServoStatusAll()
+        p = PayloadServoStateAll()
         p.pca9685Connected = 1 if a.servo_connected else 0
         p.pca9685Error     = a.servo_error
         p.enabledMask      = a.servo_enabled_mask
         for i in range(16):
             p.pulseUs[i] = a.servo_pulses[i] if (a.servo_enabled_mask & (1 << i)) else 0
-        self._emit(SERVO_STATUS_ALL, p)
+        p.timestamp = a.uptime_us & 0xFFFFFFFF
+        self._emit(SERVO_STATE_ALL, p)
 
     def _gen_sensor_imu(self):
         a = self.arduino
@@ -956,46 +1068,46 @@ class MockSerialManager:
         p.timestamp = a.uptime_us & 0xFFFFFFFF
         self._emit(SENSOR_KINEMATICS, p)
 
-    def _gen_sensor_voltage(self):
+    def _gen_sys_power(self):
         a = self.arduino
-        p = PayloadSensorVoltage()
+        p = PayloadSysPower()
         p.batteryMv   = int(_clamp(a.battery_mv + random.gauss(0, 8), 0, 65535))
         p.rail5vMv    = int(_clamp(a.rail5v_mv  + random.gauss(0, 3), 0, 65535))
         p.servoRailMv = 0
-        self._emit(SENSOR_VOLTAGE, p)
+        p.timestamp = a.uptime_us & 0xFFFFFFFF
+        self._emit(SYS_POWER, p)
 
-    def _gen_sensor_range(self):
+    def _gen_sensor_ultrasonic_all(self):
         a = self.arduino
         t = a.uptime_us / 1_000_000.0  # seconds since boot
 
-        # Sensor 0: Lidar — distance oscillates 200–1500 mm
-        p0 = PayloadSensorRange()
-        p0.sensorId   = 0
-        p0.sensorType = 1   # lidar
-        p0.status     = 0   # valid
-        p0.distanceMm = int(850 + 650 * math.sin(t * 0.5))
-        p0.timestamp  = a.uptime_us & 0xFFFFFFFF
-        self._emit(SENSOR_RANGE, p0)
+        p = PayloadSensorUltrasonicAll()
+        p.configuredCount = 2
+        p.sensors[0].status = 0
+        p.sensors[0].distanceMm = int(175 + 125 * math.sin(t * 0.8 + 1.0))
+        p.sensors[1].status = 0
+        p.sensors[1].distanceMm = int(220 + 90 * math.sin(t * 0.55 - 0.6))
+        p.timestamp = a.uptime_us & 0xFFFFFFFF
+        self._emit(SENSOR_ULTRASONIC_ALL, p)
 
-        # Sensor 1: Ultrasonic — distance oscillates 50–300 mm
-        p1 = PayloadSensorRange()
-        p1.sensorId   = 1
-        p1.sensorType = 0   # ultrasonic
-        p1.status     = 0   # valid
-        p1.distanceMm = int(175 + 125 * math.sin(t * 0.8 + 1.0))
-        p1.timestamp  = a.uptime_us & 0xFFFFFFFF
-        self._emit(SENSOR_RANGE, p1)
-
-    def _gen_io_status(self):
+    def _gen_io_input_state(self):
         a = self.arduino
-        p = PayloadIOStatus()
+        p = PayloadIOInputState()
         p.buttonMask = a.button_mask
+        p.limitMask = a.limit_mask
+        p.timestamp = (a.uptime_us // 1000) & 0xFFFFFFFF
+        self._emit(IO_INPUT_STATE, p)
+
+    def _gen_io_output_state(self):
+        a = self.arduino
+        p = PayloadIOOutputState()
         for i in range(5):
             p.ledBrightness[i] = a.led_brightness[i]
+        p.neoPixelCount = min(a.neopixel_count, 1)
         p.timestamp = (a.uptime_us // 1000) & 0xFFFFFFFF
         fixed_bytes = bytes(p)
         neo_bytes = bytes(a.neopixel_rgb[:3])
-        self._emit_raw(IO_STATUS, fixed_bytes + neo_bytes)
+        self._emit_raw(IO_OUTPUT_STATE, fixed_bytes + neo_bytes)
 
     # ------------------------------------------------------------------
     # Stats broadcast
@@ -1037,23 +1149,29 @@ class MockSerialManager:
             a     = self.arduino
             state = a.state
 
-            sys_div = self._TICK_SYS_STATUS_RUNNING if state == _SYS_RUNNING \
-                      else self._TICK_SYS_STATUS_IDLE
+            sys_div = self._TICK_SYS_STATE_RUNNING if state in (_SYS_RUNNING, _SYS_ERROR) \
+                      else self._TICK_SYS_STATE_IDLE
+            power_div = self._TICK_SYS_POWER_RUNNING if state in (_SYS_RUNNING, _SYS_ERROR) \
+                        else self._TICK_SYS_POWER_IDLE
+
             if self._tick % sys_div == 0:
-                self._gen_sys_status()
+                self._gen_sys_state()
+
+            if self._tick % power_div == 0:
+                self._gen_sys_power()
 
             if state == _SYS_RUNNING:
-                if self._tick % self._TICK_FULL == 0:
+                if self._tick % self._TICK_RUNTIME_FAST == 0:
                     self._gen_dc_status_all()
                     self._gen_step_status_all()
-                    self._gen_servo_status_all()
+                    self._gen_io_input_state()
                     self._gen_sensor_imu()
                     self._gen_sensor_kinematics()
-                    self._gen_sensor_range()
-                    self._gen_io_status()
+                    self._gen_sensor_ultrasonic_all()
 
-                if self._tick % self._TICK_VOLTAGE == 0:
-                    self._gen_sensor_voltage()
+                if self._tick % self._TICK_RUNTIME_SLOW == 0:
+                    self._gen_servo_status_all()
+                    self._gen_io_output_state()
 
             real_now = time.time()
             if real_now - self.last_stats_time >= STATS_INTERVAL:

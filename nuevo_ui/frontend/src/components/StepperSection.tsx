@@ -31,7 +31,7 @@ export function StepperSection({ stepperId }: StepperSectionProps) {
   };
 
   const handleApplyParams = () => {
-    wsSend('step_set_params', {
+    wsSend('step_config_set', {
       stepperNumber: stepperId,
       maxVelocity: parseFloat(maxVelocity),
       acceleration: parseFloat(maxAcceleration),

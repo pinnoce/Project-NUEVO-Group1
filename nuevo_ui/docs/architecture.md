@@ -8,7 +8,7 @@ Technical internals for developers extending or debugging the stack.
 
 ```
 Arduino Mega 2560
-   │  UART @ 500 kbaud, TLV framing
+   │  UART @ 250 kbaud, compact TLV framing
    ▼
 nuevo_bridge  (Python, FastAPI + asyncio)
    ├── serial_manager.py   — owns the serial port, heartbeat, decode loop
@@ -60,6 +60,16 @@ OUTGOING_REGISTRY = {
 
 The router auto-converts ctypes structs to/from JSON using field introspection. Array fields (e.g., `position[4]`) become JSON arrays automatically.
 
+It also hosts bridge-side behaviors that need to observe telemetry and emit
+commands. The main example is `MagCalibrationController`, which watches:
+
+- `mag_cal_status` for sampling state and progress
+- `imu` for raw magnetometer samples
+
+When the user starts IMU calibration, the router-side controller collects raw
+mag samples, fits hard-iron offset plus soft-iron matrix, and sends one
+`mag_cal_cmd` apply packet back to the firmware.
+
 ### `payloads.py` — ctypes structs
 All structs match `firmware/arduino/src/messages/TLV_Payloads.h` exactly.
 Sizes are verified against firmware `STATIC_ASSERT_SIZE` macros:
@@ -88,6 +98,8 @@ Sizes are verified against firmware `STATIC_ASSERT_SIZE` macros:
 | PayloadSensorCurrent | 12 |
 | PayloadIMU | 24 |
 | PayloadSensorRange | 8 |
+| PayloadMagCalCmd | 52 |
+| PayloadMagCalStatus | 44 |
 | PayloadSetLED | 8 |
 | PayloadSetNeoPixel | 4 |
 | PayloadButtonState | 8 |
@@ -142,6 +154,18 @@ src/
 2. Calls `robotStore.dispatch(topic, data, ts)` — updates the relevant store slice
 3. Components subscribe to specific slices via `useRobotStore((s) => s.xyz)`
 4. Commands go through `wsSend(cmd, data)` → WebSocket → bridge → Arduino
+
+### IMU calibration flow
+
+- `SensorSection` shows IMU data even when the magnetometer is uncalibrated
+- if `imu.magCalibrated == 0`, the IMU card shows an `Uncalibrated` warning and
+  a `Calibrate IMU` action
+- clicking calibrate opens a modal with figure-8 + tilt instructions
+- if the robot is `RUNNING`, the frontend first sends `sys_cmd(STOP)` and waits
+  for `IDLE` before starting calibration
+- once the firmware enters sampling mode, the bridge auto-fits the final
+  hard/soft-iron calibration and sends `mag_cal_cmd(MAG_CAL_APPLY)`
+- the UI closes on success, or returns to the uncalibrated state on cancel/fail
 
 ### Charts (uPlot)
 - `DCPlot.tsx` uses [uPlot](https://github.com/leeoniya/uPlot) for high-performance real-time plotting

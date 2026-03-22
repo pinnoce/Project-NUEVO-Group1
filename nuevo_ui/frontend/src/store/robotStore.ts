@@ -4,18 +4,29 @@
  */
 import { create } from 'zustand'
 import type {
-  SystemStatusData,
-  VoltageData,
   ConnectionData,
-  DCStatusAllData,
   DCMotorItem,
-  StepperStatusAllData,
-  StepperStatusItem,
-  ServoStatusAllData,
+  DCPidRspData,
+  DCStateAllData,
+  IMUData,
+  IOInputStateData,
+  IOOutputStateData,
   IOStatusData,
   KinematicsData,
-  IMUData,
   MagCalStatusData,
+  SensorRangeData,
+  SensorUltrasonicAllData,
+  ServoStatusAllData,
+  StepConfigRspData,
+  StepStateAllData,
+  StepperStatusItem,
+  SysConfigRspData,
+  SysDiagRspData,
+  SysInfoRspData,
+  SysPowerData,
+  SysStateData,
+  SystemStatusData,
+  VoltageData,
 } from '../lib/wsProtocol'
 
 interface DCMotorState {
@@ -24,18 +35,17 @@ interface DCMotorState {
   velocityHistory: number[]
   currentHistory: number[]
   pwmHistory: number[]
-  timeHistory: number[]        // bridge receive time in ms (ts * 1000)
-  frameIndexHistory: number[]  // sequential frameIndex from bridge
-  recordingStartTs: number | null  // bridge time ms when recording started; null = not recording
+  timeHistory: number[]
+  frameIndexHistory: number[]
+  recordingStartTs: number | null
 }
 
 export interface ErrorLogEntry {
-  key: string    // unique error identifier
-  label: string  // human-readable description
-  count: number  // times seen since last clear
+  key: string
+  label: string
+  count: number
 }
 
-// System errorFlags bit → label
 const SYSTEM_ERROR_LABELS: [number, string][] = [
   [0x01, 'Undervoltage'],
   [0x02, 'Overvoltage'],
@@ -46,11 +56,17 @@ const SYSTEM_ERROR_LABELS: [number, string][] = [
   [0x40, 'Loop Overrun'],
 ]
 
-// DC motor faultFlags bit → label suffix
+const WARN_TO_LEGACY_ERROR: [number, number][] = [
+  [0x01, 0x20],
+  [0x02, 0x40],
+]
+
 const DC_FAULT_LABELS: [number, string][] = [
   [0x01, 'Overcurrent'],
   [0x02, 'Stall'],
 ]
+
+const HISTORY_WINDOW_MS = 22_000
 
 function addOrIncrement(log: ErrorLogEntry[], key: string, label: string): ErrorLogEntry[] {
   const idx = log.findIndex((e) => e.key === key)
@@ -62,29 +78,8 @@ function addOrIncrement(log: ErrorLogEntry[], key: string, label: string): Error
   return [...log, { key, label, count: 1 }]
 }
 
-interface RobotState {
-  connected: boolean
-  serialConnected: boolean
-  system: SystemStatusData | null
-  voltage: VoltageData | null
-  connection: ConnectionData | null
-  dcMotors: DCMotorState[]          // indexed 0-3 (motorNumber - 1)
-  steppers: (StepperStatusItem | null)[]  // indexed 0-3
-  servo: ServoStatusAllData | null
-  io: IOStatusData | null
-  kinematics: KinematicsData | null
-  imu: IMUData | null
-  magCal: MagCalStatusData | null
-  errorLog: ErrorLogEntry[]
-  dispatch: (topic: string, data: any, ts?: number) => void
-  setMotorRecording: (motorIdx: number, active: boolean) => void
-  clearErrorLog: () => void
-}
-
-const HISTORY_WINDOW_MS = 22_000
-
-const initDCMotors = (): DCMotorState[] =>
-  Array.from({ length: 4 }, () => ({
+function initDCMotors(): DCMotorState[] {
+  return Array.from({ length: 4 }, () => ({
     status: null,
     positionHistory: [],
     velocityHistory: [],
@@ -94,6 +89,130 @@ const initDCMotors = (): DCMotorState[] =>
     frameIndexHistory: [],
     recordingStartTs: null,
   }))
+}
+
+function buildLegacyErrorFlags(sysState: SysStateData | null): number {
+  if (!sysState) return 0
+  let errorFlags = int(sysState.errorFlags)
+  for (const [warnBit, legacyBit] of WARN_TO_LEGACY_ERROR) {
+    if (sysState.warningFlags & warnBit) errorFlags |= legacyBit
+  }
+  return errorFlags
+}
+
+function int(value: number | undefined | null): number {
+  return Number(value ?? 0)
+}
+
+function buildAttachedSensorsMask(sysInfo: SysInfoRspData | null): number {
+  if (!sysInfo) return 0
+  let mask = 0
+  if (sysInfo.sensorCapabilityMask & 0x01) mask |= 0x01
+  if (sysInfo.sensorCapabilityMask & 0x02) mask |= 0x04
+  return mask
+}
+
+function buildSystemStatus(
+  sysState: SysStateData | null,
+  sysPower: SysPowerData | null,
+  sysInfo: SysInfoRspData | null,
+  sysConfig: SysConfigRspData | null,
+  sysDiag: SysDiagRspData | null,
+): SystemStatusData | null {
+  if (!sysState) return null
+  return {
+    firmwareMajor: int(sysInfo?.firmwareMajor),
+    firmwareMinor: int(sysInfo?.firmwareMinor),
+    firmwarePatch: int(sysInfo?.firmwarePatch),
+    state: int(sysState.state),
+    uptimeMs: int(sysState.uptimeMs),
+    lastRxMs: int(sysState.lastRxMs),
+    lastCmdMs: int(sysState.lastCmdMs),
+    batteryMv: int(sysPower?.batteryMv),
+    rail5vMv: int(sysPower?.rail5vMv),
+    errorFlags: buildLegacyErrorFlags(sysState),
+    attachedSensors: buildAttachedSensorsMask(sysInfo),
+    freeSram: int(sysDiag?.freeSram),
+    loopTimeAvgUs: int(sysDiag?.loopTimeAvgUs),
+    loopTimeMaxUs: int(sysDiag?.loopTimeMaxUs),
+    uartRxErrors: int(sysDiag?.uartRxErrors),
+    motorDirMask: int(sysConfig?.motorDirMask),
+    neoPixelCount: int(sysConfig?.neoPixelCount),
+    heartbeatTimeoutMs: int(sysConfig?.heartbeatTimeoutMs),
+    limitSwitchMask: int(sysInfo?.limitSwitchMask),
+    stepperHomeLimitGpio: sysInfo?.stepperHomeLimitGpio ?? [0xFF, 0xFF, 0xFF, 0xFF],
+    warningFlags: int(sysState.warningFlags),
+    runtimeFlags: int(sysState.runtimeFlags),
+  }
+}
+
+function buildVoltage(sysPower: SysPowerData | null): VoltageData | null {
+  if (!sysPower) return null
+  return {
+    batteryMv: int(sysPower.batteryMv),
+    rail5vMv: int(sysPower.rail5vMv),
+    servoRailMv: int(sysPower.servoRailMv),
+  }
+}
+
+function buildIOStatus(ioInput: IOInputStateData | null, ioOutput: IOOutputStateData | null): IOStatusData | null {
+  if (!ioInput && !ioOutput) return null
+  return {
+    buttonMask: int(ioInput?.buttonMask),
+    limitMask: int(ioInput?.limitMask),
+    ledBrightness: ioOutput?.ledBrightness ?? [0, 0, 0, 0, 0],
+    timestamp: Math.max(int(ioInput?.timestamp), int(ioOutput?.timestamp)),
+    neoPixels: ioOutput?.neoPixels ?? [],
+  }
+}
+
+function buildRangeSensors(bundle: SensorUltrasonicAllData): SensorRangeData[] {
+  const sensors: SensorRangeData[] = []
+  for (let sensorId = 0; sensorId < Math.min(bundle.configuredCount, bundle.sensors.length); sensorId += 1) {
+    const sensor = bundle.sensors[sensorId]
+    sensors.push({
+      sensorId,
+      sensorType: 0,
+      status: int(sensor.status),
+      distanceMm: int(sensor.distanceMm),
+      timestamp: int(bundle.timestamp),
+    })
+  }
+  return sensors
+}
+
+function cacheKey(motorNumber: number, loopType: number): string {
+  return `${motorNumber}:${loopType}`
+}
+
+interface RobotState {
+  connected: boolean
+  serialConnected: boolean
+  system: SystemStatusData | null
+  voltage: VoltageData | null
+  connection: ConnectionData | null
+  dcMotors: DCMotorState[]
+  steppers: (StepperStatusItem | null)[]
+  servo: ServoStatusAllData | null
+  io: IOStatusData | null
+  kinematics: KinematicsData | null
+  imu: IMUData | null
+  magCal: MagCalStatusData | null
+  rangeSensors: SensorRangeData[]
+  errorLog: ErrorLogEntry[]
+  sysStateRaw: SysStateData | null
+  sysInfoRaw: SysInfoRspData | null
+  sysConfigRaw: SysConfigRspData | null
+  sysPowerRaw: SysPowerData | null
+  sysDiagRaw: SysDiagRspData | null
+  ioInputRaw: IOInputStateData | null
+  ioOutputRaw: IOOutputStateData | null
+  dcPidCache: Record<string, DCPidRspData>
+  stepConfigCache: Record<number, StepConfigRspData>
+  dispatch: (topic: string, data: any, ts?: number) => void
+  setMotorRecording: (motorIdx: number, active: boolean) => void
+  clearErrorLog: () => void
+}
 
 export const useRobotStore = create<RobotState>((set) => ({
   connected: false,
@@ -108,7 +227,17 @@ export const useRobotStore = create<RobotState>((set) => ({
   kinematics: null,
   imu: null,
   magCal: null,
+  rangeSensors: [],
   errorLog: [],
+  sysStateRaw: null,
+  sysInfoRaw: null,
+  sysConfigRaw: null,
+  sysPowerRaw: null,
+  sysDiagRaw: null,
+  ioInputRaw: null,
+  ioOutputRaw: null,
+  dcPidCache: {},
+  stepConfigCache: {},
 
   clearErrorLog: () => set({ errorLog: [] }),
 
@@ -116,13 +245,9 @@ export const useRobotStore = create<RobotState>((set) => ({
     set((state) => {
       const newDCMotors = [...state.dcMotors]
       const motor = { ...newDCMotors[motorIdx] }
-      if (active) {
-        // recordingStartTs = bridge time of the most recent sample (or null if no data yet)
-        const lastTs = motor.timeHistory[motor.timeHistory.length - 1] ?? null
-        motor.recordingStartTs = lastTs
-      } else {
-        motor.recordingStartTs = null
-      }
+      motor.recordingStartTs = active
+        ? (motor.timeHistory[motor.timeHistory.length - 1] ?? null)
+        : null
       newDCMotors[motorIdx] = motor
       return { dcMotors: newDCMotors }
     })
@@ -130,50 +255,109 @@ export const useRobotStore = create<RobotState>((set) => ({
 
   dispatch: (topic: string, data: any, ts?: number) => {
     switch (topic) {
-      case 'system_status': {
-        const newSystem = data as SystemStatusData
-        set({ system: newSystem })
+      case 'sys_state':
+        set((state) => {
+          const sysStateRaw = data as SysStateData
+          const system = buildSystemStatus(
+            sysStateRaw,
+            state.sysPowerRaw,
+            state.sysInfoRaw,
+            state.sysConfigRaw,
+            state.sysDiagRaw,
+          )
 
-        // Decode errorFlags bits and accumulate into error log
-        if (newSystem.errorFlags) {
-          set((state) => {
-            let log = state.errorLog
+          let errorLog = state.errorLog
+          if (system?.errorFlags) {
             for (const [bit, label] of SYSTEM_ERROR_LABELS) {
-              if (newSystem.errorFlags & bit) {
-                log = addOrIncrement(log, `sys_${bit}`, label)
+              if (system.errorFlags & bit) {
+                errorLog = addOrIncrement(errorLog, `sys_${bit}`, label)
               }
             }
-            return { errorLog: log }
-          })
-        }
+          }
 
-        // When ESTOP/ERROR is detected, immediately reflect disabled state in the UI
-        // without waiting for individual motor/servo/stepper status updates.
-        if (newSystem.state === 4 || newSystem.state === 3) {
-          set((state) => ({
-            // Mark all DC motors as mode=0 (disabled)
-            dcMotors: state.dcMotors.map((m) => ({
+          const update: Partial<RobotState> = { sysStateRaw, system, errorLog }
+          if (system && (system.state === 3 || system.state === 4)) {
+            update.dcMotors = state.dcMotors.map((m) => ({
               ...m,
               status: m.status ? { ...m.status, mode: 0, pwmOutput: 0, velocity: 0 } : null,
-            })),
-            // Mark all steppers as disabled
-            steppers: state.steppers.map((s) =>
+            }))
+            update.steppers = state.steppers.map((s) =>
               s ? { ...s, enabled: 0, currentSpeed: 0 } : null
-            ),
-            // Mark all servo channels as disabled
-            servo: state.servo
+            )
+            update.servo = state.servo
               ? {
                   ...state.servo,
                   channels: state.servo.channels.map((ch) => ({ ...ch, enabled: false })),
                 }
-              : null,
-          }))
-        }
+              : null
+          }
+          return update
+        })
         break
-      }
 
-      case 'voltage':
-        set({ voltage: data as VoltageData })
+      case 'sys_power':
+        set((state) => {
+          const sysPowerRaw = data as SysPowerData
+          return {
+            sysPowerRaw,
+            voltage: buildVoltage(sysPowerRaw),
+            system: buildSystemStatus(
+              state.sysStateRaw,
+              sysPowerRaw,
+              state.sysInfoRaw,
+              state.sysConfigRaw,
+              state.sysDiagRaw,
+            ),
+          }
+        })
+        break
+
+      case 'sys_info_rsp':
+        set((state) => {
+          const sysInfoRaw = data as SysInfoRspData
+          return {
+            sysInfoRaw,
+            system: buildSystemStatus(
+              state.sysStateRaw,
+              state.sysPowerRaw,
+              sysInfoRaw,
+              state.sysConfigRaw,
+              state.sysDiagRaw,
+            ),
+          }
+        })
+        break
+
+      case 'sys_config_rsp':
+        set((state) => {
+          const sysConfigRaw = data as SysConfigRspData
+          return {
+            sysConfigRaw,
+            system: buildSystemStatus(
+              state.sysStateRaw,
+              state.sysPowerRaw,
+              state.sysInfoRaw,
+              sysConfigRaw,
+              state.sysDiagRaw,
+            ),
+          }
+        })
+        break
+
+      case 'sys_diag_rsp':
+        set((state) => {
+          const sysDiagRaw = data as SysDiagRspData
+          return {
+            sysDiagRaw,
+            system: buildSystemStatus(
+              state.sysStateRaw,
+              state.sysPowerRaw,
+              state.sysInfoRaw,
+              state.sysConfigRaw,
+              sysDiagRaw,
+            ),
+          }
+        })
         break
 
       case 'connection':
@@ -183,24 +367,48 @@ export const useRobotStore = create<RobotState>((set) => ({
         })
         break
 
-      case 'dc_status_all': {
-        // Use bridge receive time (ts * 1000 ms) for accurate timing
+      case 'dc_pid_rsp':
+        set((state) => {
+          const incoming = data as DCPidRspData
+          const nextCache = {
+            ...state.dcPidCache,
+            [cacheKey(incoming.motorNumber, incoming.loopType)]: incoming,
+          }
+          const idx = incoming.motorNumber - 1
+          const nextMotors = [...state.dcMotors]
+          const prev = nextMotors[idx]
+          if (prev?.status) {
+            const status = { ...prev.status }
+            if (incoming.loopType === 0) {
+              status.posKp = incoming.kp
+              status.posKi = incoming.ki
+              status.posKd = incoming.kd
+            } else {
+              status.velKp = incoming.kp
+              status.velKi = incoming.ki
+              status.velKd = incoming.kd
+            }
+            nextMotors[idx] = { ...prev, status }
+          }
+          return { dcPidCache: nextCache, dcMotors: nextMotors }
+        })
+        break
+
+      case 'dc_state_all': {
         const bridgeTimeMs = ts ? ts * 1000 : Date.now()
         const cutoff = bridgeTimeMs - HISTORY_WINDOW_MS
-        const motors = (data as DCStatusAllData).motors
+        const motors = (data as DCStateAllData).motors
 
-        // Log DC motor faults
         for (const motor of motors) {
           if (motor.faultFlags) {
             set((state) => {
-              let log = state.errorLog
+              let errorLog = state.errorLog
               for (const [bit, suffix] of DC_FAULT_LABELS) {
                 if (motor.faultFlags & bit) {
-                  const key = `dc_${bit}_${motor.motorNumber}`
-                  log = addOrIncrement(log, key, `Motor ${motor.motorNumber} ${suffix}`)
+                  errorLog = addOrIncrement(errorLog, `dc_${bit}_${motor.motorNumber}`, `Motor ${motor.motorNumber} ${suffix}`)
                 }
               }
-              return { errorLog: log }
+              return { errorLog }
             })
           }
         }
@@ -210,31 +418,42 @@ export const useRobotStore = create<RobotState>((set) => ({
           for (const motor of motors) {
             const idx = motor.motorNumber - 1
             if (idx < 0 || idx > 3) continue
+
+            const posPid = state.dcPidCache[cacheKey(motor.motorNumber, 0)]
+            const velPid = state.dcPidCache[cacheKey(motor.motorNumber, 1)]
+            const merged: DCMotorItem = {
+              ...motor,
+              posKp: posPid?.kp ?? 0,
+              posKi: posPid?.ki ?? 0,
+              posKd: posPid?.kd ?? 0,
+              velKp: velPid?.kp ?? 0,
+              velKi: velPid?.ki ?? 0,
+              velKd: velPid?.kd ?? 0,
+            }
+
             const prev = newDCMotors[idx]
             const isRecording = prev.recordingStartTs !== null
+            const newTime = [...prev.timeHistory, bridgeTimeMs]
+            const newPos = [...prev.positionHistory, merged.position]
+            const newVel = [...prev.velocityHistory, merged.velocity]
+            const newCur = [...prev.currentHistory, merged.currentMa]
+            const newPwm = [...prev.pwmHistory, merged.pwmOutput]
+            const newFrame = [...prev.frameIndexHistory, merged.frameIndex]
 
-            const newTime  = [...prev.timeHistory, bridgeTimeMs]
-            const newPos   = [...prev.positionHistory, motor.position]
-            const newVel   = [...prev.velocityHistory, motor.velocity]
-            const newCur   = [...prev.currentHistory, motor.currentMa]
-            const newPwm   = [...prev.pwmHistory, motor.pwmOutput]
-            const newFrame = [...prev.frameIndexHistory, motor.frameIndex]
-
-            // Only prune the rolling window when NOT recording
             let start = 0
             if (!isRecording) {
-              while (start < newTime.length && newTime[start] < cutoff) start++
+              while (start < newTime.length && newTime[start] < cutoff) start += 1
             }
 
             newDCMotors[idx] = {
-              status: motor,
+              status: merged,
               recordingStartTs: prev.recordingStartTs,
-              positionHistory:    start > 0 ? newPos.slice(start)   : newPos,
-              velocityHistory:    start > 0 ? newVel.slice(start)   : newVel,
-              currentHistory:     start > 0 ? newCur.slice(start)   : newCur,
-              pwmHistory:         start > 0 ? newPwm.slice(start)   : newPwm,
-              timeHistory:        start > 0 ? newTime.slice(start)  : newTime,
-              frameIndexHistory:  start > 0 ? newFrame.slice(start) : newFrame,
+              positionHistory: start > 0 ? newPos.slice(start) : newPos,
+              velocityHistory: start > 0 ? newVel.slice(start) : newVel,
+              currentHistory: start > 0 ? newCur.slice(start) : newCur,
+              pwmHistory: start > 0 ? newPwm.slice(start) : newPwm,
+              timeHistory: start > 0 ? newTime.slice(start) : newTime,
+              frameIndexHistory: start > 0 ? newFrame.slice(start) : newFrame,
             }
           }
           return { dcMotors: newDCMotors }
@@ -242,37 +461,81 @@ export const useRobotStore = create<RobotState>((set) => ({
         break
       }
 
-      case 'step_status_all': {
-        const steppers = (data as StepperStatusAllData).steppers
+      case 'step_config_rsp':
+        set((state) => {
+          const incoming = data as StepConfigRspData
+          const nextCache = { ...state.stepConfigCache, [incoming.stepperNumber]: incoming }
+          const idx = incoming.stepperNumber - 1
+          const nextSteppers = [...state.steppers]
+          const prev = nextSteppers[idx]
+          if (prev) {
+            nextSteppers[idx] = {
+              ...prev,
+              maxSpeed: incoming.maxVelocity,
+              acceleration: incoming.acceleration,
+            }
+          }
+          return { stepConfigCache: nextCache, steppers: nextSteppers }
+        })
+        break
+
+      case 'step_state_all':
         set((state) => {
           const next = [...state.steppers]
-          for (const s of steppers) {
+          for (const s of (data as StepStateAllData).steppers) {
             const idx = s.stepperNumber - 1
-            if (idx >= 0 && idx <= 3) next[idx] = s
+            if (idx < 0 || idx > 3) continue
+            const cfg = state.stepConfigCache[s.stepperNumber]
+            next[idx] = {
+              ...s,
+              commandedCount: s.count,
+              limitHit: s.limitFlags,
+              maxSpeed: cfg?.maxVelocity ?? 0,
+              acceleration: cfg?.acceleration ?? 0,
+            }
           }
           return { steppers: next }
         })
         break
-      }
 
-      case 'servo_status_all':
+      case 'servo_state_all':
         set({ servo: data as ServoStatusAllData })
         break
 
-      case 'io_status':
-        set({ io: data as IOStatusData })
+      case 'io_input_state':
+        set((state) => {
+          const ioInputRaw = data as IOInputStateData
+          return {
+            ioInputRaw,
+            io: buildIOStatus(ioInputRaw, state.ioOutputRaw),
+          }
+        })
         break
 
-      case 'kinematics':
+      case 'io_output_state':
+        set((state) => {
+          const ioOutputRaw = data as IOOutputStateData
+          return {
+            ioOutputRaw,
+            io: buildIOStatus(state.ioInputRaw, ioOutputRaw),
+          }
+        })
+        break
+
+      case 'sensor_kinematics':
         set({ kinematics: data as KinematicsData })
         break
 
-      case 'imu':
+      case 'sensor_imu':
         set({ imu: data as IMUData })
         break
 
-      case 'mag_cal_status':
+      case 'sensor_mag_cal_status':
         set({ magCal: data as MagCalStatusData })
+        break
+
+      case 'sensor_ultrasonic_all':
+        set({ rangeSensors: buildRangeSensors(data as SensorUltrasonicAllData) })
         break
 
       default:

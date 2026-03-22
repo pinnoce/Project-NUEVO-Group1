@@ -46,6 +46,7 @@ if MOCK_MODE:
     serial_manager = MockSerialManager(message_router, ws_manager)
 else:
     serial_manager = SerialManager(message_router, ws_manager)
+message_router.attach_transport_sender(serial_manager.send)
 
 serial_task  = None
 ros2_node    = None

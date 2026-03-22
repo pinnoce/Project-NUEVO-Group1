@@ -92,7 +92,7 @@ export function DCMotorSection({ motorId }: DCMotorSectionProps) {
 
   const handleApplyPID = () => {
     const pid = controlMode === "velocity" ? velocityPID : positionPID;
-    wsSend('set_pid', {
+    wsSend('dc_pid_set', {
       motorNumber: motorId,
       loopType: controlMode === "velocity" ? 1 : 0,
       kp: parseFloat(pid.p),

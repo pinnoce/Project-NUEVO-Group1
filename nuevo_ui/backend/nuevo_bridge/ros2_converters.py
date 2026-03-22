@@ -56,7 +56,7 @@ def _header(stamp: Time, frame_id: str = '') -> Header:
 # ── Incoming: Arduino → ROS2 ─────────────────────────────────────────────────
 
 def to_imu(data: dict, stamp: Time) -> Imu:
-    """'imu' topic dict → sensor_msgs/Imu.
+    """'sensor_imu' topic dict → sensor_msgs/Imu.
 
     orientation  : AHRS quaternion (Madgwick filter output)
     linear_accel : body-frame raw accelerometer including gravity (m/s²)
@@ -87,7 +87,7 @@ def to_imu(data: dict, stamp: Time) -> Imu:
 
 
 def to_mag(data: dict, stamp: Time) -> MagneticField:
-    """'imu' topic dict → sensor_msgs/MagneticField (Tesla)."""
+    """'sensor_imu' topic dict → sensor_msgs/MagneticField (Tesla)."""
     msg = MagneticField()
     msg.header = _header(stamp, 'imu_link')
     msg.magnetic_field.x = data['magX'] * _UT_TO_T
@@ -98,7 +98,7 @@ def to_mag(data: dict, stamp: Time) -> MagneticField:
 
 
 def to_odom(data: dict, stamp: Time) -> Odometry:
-    """'kinematics' topic dict → nav_msgs/Odometry.
+    """'sensor_kinematics' topic dict → nav_msgs/Odometry.
 
     Converts firmware units (mm, mm/s, rad) to ROS SI units (m, m/s, rad).
     For a differential-drive robot theta is purely a Z-axis rotation, so the
@@ -129,7 +129,7 @@ def to_odom(data: dict, stamp: Time) -> Odometry:
 
 
 def to_voltage(data: dict, stamp: Time) -> Voltage:
-    """'voltage' topic dict → nuevo_msgs/Voltage."""
+    """'sys_power' topic dict → nuevo_msgs/Voltage."""
     msg = Voltage()
     msg.header = _header(stamp)
     msg.battery_mv    = int(data['batteryMv'])
@@ -139,7 +139,7 @@ def to_voltage(data: dict, stamp: Time) -> Voltage:
 
 
 def to_sys_status(data: dict, stamp: Time) -> SystemStatus:
-    """'system_status' topic dict → nuevo_msgs/SystemStatus."""
+    """Merged sys_* topic view → nuevo_msgs/SystemStatus."""
     msg = SystemStatus()
     msg.header = _header(stamp)
     msg.state              = data['state']
@@ -164,7 +164,7 @@ def to_sys_status(data: dict, stamp: Time) -> SystemStatus:
 
 
 def to_dc_status_all(data: dict, stamp: Time) -> DCStatusAll:
-    """'dc_status_all' topic dict → nuevo_msgs/DCStatusAll."""
+    """Merged dc_state_all + dc_pid_rsp view → nuevo_msgs/DCStatusAll."""
     msg = DCStatusAll()
     msg.header = _header(stamp)
     motors = data['motors']
@@ -191,7 +191,7 @@ def to_dc_status_all(data: dict, stamp: Time) -> DCStatusAll:
 
 
 def to_step_status_all(data: dict, stamp: Time) -> StepStatusAll:
-    """'step_status_all' topic dict → nuevo_msgs/StepStatusAll."""
+    """Merged step_state_all + step_config_rsp view → nuevo_msgs/StepStatusAll."""
     msg = StepStatusAll()
     msg.header = _header(stamp)
     for s_data in data['steppers']:
@@ -210,7 +210,7 @@ def to_step_status_all(data: dict, stamp: Time) -> StepStatusAll:
 
 
 def to_servo_status_all(data: dict, stamp: Time) -> ServoStatusAll:
-    """'servo_status_all' topic dict → nuevo_msgs/ServoStatusAll."""
+    """'servo_state_all' topic dict → nuevo_msgs/ServoStatusAll."""
     msg = ServoStatusAll()
     msg.header = _header(stamp)
     msg.pca9685_connected = bool(data['pca9685Connected'])
@@ -225,7 +225,7 @@ def to_servo_status_all(data: dict, stamp: Time) -> ServoStatusAll:
 
 
 def to_io_status(data: dict, stamp: Time) -> IOStatus:
-    """'io_status' topic dict → nuevo_msgs/IOStatus."""
+    """Merged io_input_state + io_output_state view → nuevo_msgs/IOStatus."""
     msg = IOStatus()
     msg.header = _header(stamp)
     msg.button_mask    = data['buttonMask']
@@ -239,7 +239,7 @@ def to_io_status(data: dict, stamp: Time) -> IOStatus:
 
 
 def to_mag_cal_status(data: dict, stamp: Time) -> MagCalStatus:
-    """'mag_cal_status' topic dict → nuevo_msgs/MagCalStatus.
+    """'sensor_mag_cal_status' topic dict → nuevo_msgs/MagCalStatus.
 
     field_strength is estimated from the half-range of each calibration axis
     (radius of the calibration sphere), which approximates the local field

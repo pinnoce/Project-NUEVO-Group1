@@ -71,6 +71,15 @@ class NuevoBridgeNode(Node):
         self._serial = serial_manager
         self._router = message_router
         self._clock  = self.get_clock()
+        self._sys_state = None
+        self._sys_info = None
+        self._sys_config = None
+        self._sys_power = None
+        self._sys_diag = None
+        self._io_input = None
+        self._io_output = None
+        self._dc_pid_cache = {}
+        self._step_config_cache = {}
 
         # ── QoS ───────────────────────────────────────────────────────────────
         # Depth 10 is sufficient for sensor data; no durability/reliability
@@ -105,15 +114,21 @@ class NuevoBridgeNode(Node):
         # Topics with multiple publishers (imu, kinematics) use a callable
         # handler instead of a (pub, conv) tuple.
         self._handlers = {
-            'imu':              self._handle_imu,
-            'kinematics':       self._handle_odom,
-            'voltage':          (self._pub_voltage, conv.to_voltage),
-            'system_status':    (self._pub_sys,     conv.to_sys_status),
-            'dc_status_all':    (self._pub_dc,      conv.to_dc_status_all),
-            'step_status_all':  (self._pub_step,    conv.to_step_status_all),
-            'servo_status_all': (self._pub_servo,   conv.to_servo_status_all),
-            'io_status':        (self._pub_io,       conv.to_io_status),
-            'mag_cal_status':   (self._pub_mag_cal,  conv.to_mag_cal_status),
+            'sensor_imu':             self._handle_imu,
+            'sensor_kinematics':      self._handle_odom,
+            'sys_state':              self._handle_sys_state,
+            'sys_info_rsp':           self._handle_sys_info_rsp,
+            'sys_config_rsp':         self._handle_sys_config_rsp,
+            'sys_power':              self._handle_sys_power,
+            'sys_diag_rsp':           self._handle_sys_diag_rsp,
+            'dc_state_all':           self._handle_dc_state_all,
+            'dc_pid_rsp':             self._handle_dc_pid_rsp,
+            'step_state_all':         self._handle_step_state_all,
+            'step_config_rsp':        self._handle_step_config_rsp,
+            'servo_state_all':        (self._pub_servo,   conv.to_servo_status_all),
+            'io_input_state':         self._handle_io_input_state,
+            'io_output_state':        self._handle_io_output_state,
+            'sensor_mag_cal_status':  (self._pub_mag_cal, conv.to_mag_cal_status),
         }
 
         self.get_logger().info('NuevoBridgeNode started — publishing to /odom, /imu/*, /nuevo/*')
@@ -144,6 +159,133 @@ class NuevoBridgeNode(Node):
 
     def _handle_odom(self, data: dict, stamp) -> None:
         self._pub_odom.publish(conv.to_odom(data, stamp))
+
+    def _legacy_error_flags(self) -> int:
+        if not self._sys_state:
+            return 0
+        error_flags = int(self._sys_state.get('errorFlags', 0))
+        warning_flags = int(self._sys_state.get('warningFlags', 0))
+        if warning_flags & 0x01:
+            error_flags |= 0x20
+        if warning_flags & 0x02:
+            error_flags |= 0x40
+        return error_flags
+
+    def _attached_sensors_mask(self) -> int:
+        capability = int((self._sys_info or {}).get('sensorCapabilityMask', 0))
+        mask = 0
+        if capability & 0x01:
+            mask |= 0x01
+        if capability & 0x02:
+            mask |= 0x04
+        return mask
+
+    def _publish_system_status(self, stamp) -> None:
+        if self._sys_state is None:
+            return
+        merged = {
+            'firmwareMajor': int((self._sys_info or {}).get('firmwareMajor', 0)),
+            'firmwareMinor': int((self._sys_info or {}).get('firmwareMinor', 0)),
+            'firmwarePatch': int((self._sys_info or {}).get('firmwarePatch', 0)),
+            'state': int(self._sys_state.get('state', 0)),
+            'uptimeMs': int(self._sys_state.get('uptimeMs', 0)),
+            'lastRxMs': int(self._sys_state.get('lastRxMs', 0)),
+            'lastCmdMs': int(self._sys_state.get('lastCmdMs', 0)),
+            'batteryMv': int((self._sys_power or {}).get('batteryMv', 0)),
+            'rail5vMv': int((self._sys_power or {}).get('rail5vMv', 0)),
+            'errorFlags': self._legacy_error_flags(),
+            'attachedSensors': self._attached_sensors_mask(),
+            'freeSram': int((self._sys_diag or {}).get('freeSram', 0)),
+            'loopTimeAvgUs': int((self._sys_diag or {}).get('loopTimeAvgUs', 0)),
+            'loopTimeMaxUs': int((self._sys_diag or {}).get('loopTimeMaxUs', 0)),
+            'uartRxErrors': int((self._sys_diag or {}).get('uartRxErrors', 0)),
+            'motorDirMask': int((self._sys_config or {}).get('motorDirMask', 0)),
+            'neoPixelCount': int((self._sys_config or {}).get('neoPixelCount', 0)),
+            'heartbeatTimeoutMs': int((self._sys_config or {}).get('heartbeatTimeoutMs', 0)),
+            'limitSwitchMask': int((self._sys_info or {}).get('limitSwitchMask', 0)),
+            'stepperHomeLimitGpio': list((self._sys_info or {}).get('stepperHomeLimitGpio', [0xFF, 0xFF, 0xFF, 0xFF])),
+        }
+        self._pub_sys.publish(conv.to_sys_status(merged, stamp))
+
+    def _handle_sys_state(self, data: dict, stamp) -> None:
+        self._sys_state = data
+        self._publish_system_status(stamp)
+
+    def _handle_sys_info_rsp(self, data: dict, stamp) -> None:
+        self._sys_info = data
+        self._publish_system_status(stamp)
+
+    def _handle_sys_config_rsp(self, data: dict, stamp) -> None:
+        self._sys_config = data
+        self._publish_system_status(stamp)
+
+    def _handle_sys_power(self, data: dict, stamp) -> None:
+        self._sys_power = data
+        self._pub_voltage.publish(conv.to_voltage(data, stamp))
+        self._publish_system_status(stamp)
+
+    def _handle_sys_diag_rsp(self, data: dict, stamp) -> None:
+        self._sys_diag = data
+        self._publish_system_status(stamp)
+
+    def _handle_dc_pid_rsp(self, data: dict, stamp) -> None:
+        self._dc_pid_cache[(int(data['motorNumber']), int(data['loopType']))] = data
+
+    def _handle_dc_state_all(self, data: dict, stamp) -> None:
+        merged = {'motors': []}
+        for motor in data['motors']:
+            motor_number = int(motor['motorNumber'])
+            pos_pid = self._dc_pid_cache.get((motor_number, 0), {})
+            vel_pid = self._dc_pid_cache.get((motor_number, 1), {})
+            merged['motors'].append({
+                **motor,
+                'posKp': float(pos_pid.get('kp', 0.0)),
+                'posKi': float(pos_pid.get('ki', 0.0)),
+                'posKd': float(pos_pid.get('kd', 0.0)),
+                'velKp': float(vel_pid.get('kp', 0.0)),
+                'velKi': float(vel_pid.get('ki', 0.0)),
+                'velKd': float(vel_pid.get('kd', 0.0)),
+            })
+        self._pub_dc.publish(conv.to_dc_status_all(merged, stamp))
+
+    def _handle_step_config_rsp(self, data: dict, stamp) -> None:
+        self._step_config_cache[int(data['stepperNumber'])] = data
+
+    def _handle_step_state_all(self, data: dict, stamp) -> None:
+        merged = {'steppers': []}
+        for stepper in data['steppers']:
+            stepper_number = int(stepper['stepperNumber'])
+            cfg = self._step_config_cache.get(stepper_number, {})
+            merged['steppers'].append({
+                **stepper,
+                'limitHit': int(stepper['limitFlags']),
+                'commandedCount': int(stepper['count']),
+                'maxSpeed': int(cfg.get('maxVelocity', 0)),
+                'acceleration': int(cfg.get('acceleration', 0)),
+            })
+        self._pub_step.publish(conv.to_step_status_all(merged, stamp))
+
+    def _publish_io_status(self, stamp) -> None:
+        if self._io_input is None and self._io_output is None:
+            return
+        merged = {
+          'buttonMask': int((self._io_input or {}).get('buttonMask', 0)),
+          'ledBrightness': list((self._io_output or {}).get('ledBrightness', [0, 0, 0, 0, 0])),
+          'neoPixels': list((self._io_output or {}).get('neoPixels', [])),
+          'timestamp': max(
+              int((self._io_input or {}).get('timestamp', 0)),
+              int((self._io_output or {}).get('timestamp', 0)),
+          ),
+        }
+        self._pub_io.publish(conv.to_io_status(merged, stamp))
+
+    def _handle_io_input_state(self, data: dict, stamp) -> None:
+        self._io_input = data
+        self._publish_io_status(stamp)
+
+    def _handle_io_output_state(self, data: dict, stamp) -> None:
+        self._io_output = data
+        self._publish_io_status(stamp)
 
     # ── Subscriber callbacks (run in rclpy spin thread) ───────────────────────
 
@@ -184,7 +326,7 @@ class NuevoBridgeNode(Node):
 
         command_type:
           0 = STEP_MOVE       1 = STEP_HOME
-          2 = STEP_ENABLE     3 = STEP_DISABLE    4 = STEP_SET_PARAMS
+          2 = STEP_ENABLE     3 = STEP_DISABLE    4 = STEP_CONFIG_SET
         """
         n  = msg.stepper_number
         ct = msg.command_type
@@ -206,7 +348,7 @@ class NuevoBridgeNode(Node):
         elif ct == 3:
             self._send('step_enable', {'stepperNumber': n, 'enable': 0})
         elif ct == 4:
-            self._send('step_set_params', {
+            self._send('step_config_set', {
                 'stepperNumber': n,
                 'maxVelocity':   msg.max_velocity,
                 'acceleration':  msg.acceleration,
@@ -231,7 +373,7 @@ class NuevoBridgeNode(Node):
 
     def _on_mag_cal_cmd(self, msg: MagCalCmd) -> None:
         """Forward magnetometer calibration command."""
-        self._send('mag_cal_cmd', {
+        self._send('sensor_mag_cal_cmd', {
             'command': msg.command,
             'offsetX': float(msg.offset_x),
             'offsetY': float(msg.offset_y),

@@ -67,7 +67,7 @@ export function UserIOSection() {
 
   const toggleLed = (index: number) => {
     const next = !ledOn(index);
-    wsSend('set_led', { ledId: index, mode: next ? 1 : 0, brightness: 255 });
+    wsSend('io_set_led', { ledId: index, mode: next ? 1 : 0, brightness: 255 });
   };
 
   const addStrip = () => {
@@ -102,7 +102,7 @@ export function UserIOSection() {
           const [r, g, b] = hslToRgb(next.hue, next.brightness);
           next.r = r; next.g = g; next.b = b;
           // Send command for strip index 0-based (strip.id - 1)
-          wsSend('set_neopixel', {
+          wsSend('io_set_neopixel', {
             index: id - 1,
             red: r, green: g, blue: b,
           });

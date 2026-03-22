@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { AnimatePresence } from 'motion/react';
 import { Wifi, WifiOff, AlertTriangle, Users, ChevronDown } from 'lucide-react';
 import screwLogo from './assets/screw_logo.svg';
 import { PowerSection } from './components/PowerSection';
@@ -9,20 +8,13 @@ import { RpiSystemSection } from './components/RpiSystemSection';
 import { ArduinoSystemSection } from './components/ArduinoSystemSection';
 import { UserIOSection } from './components/UserIOSection';
 import { DCMotorSection } from './components/DCMotorSection';
-import { AddModuleButton } from './components/AddModuleButton';
-import { ModuleCard } from './components/ModuleCard';
+import { SensorSection } from './components/SensorSection';
 import { LoginPage } from './components/LoginPage';
 import { UserManagementModal } from './components/UserManagementModal';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useRobotStore } from './store/robotStore';
 import { useAuthStore } from './store/authStore';
 import { getMe } from './api/auth';
-
-interface Module {
-  id: number;
-  type: string;
-  name: string;
-}
 
 // ─── Auth gate ────────────────────────────────────────────────────────────────
 // Validates the stored token on mount. Shows a minimal spinner while checking,
@@ -77,25 +69,7 @@ function Dashboard() {
 
   const handleEstop = () => send('sys_cmd', { command: 4 });
 
-  const [qwiicModules, setQwiicModules] = useState<Module[]>([]);
-  const [sensorModules, setSensorModules] = useState<Module[]>([]);
   const [showUserModal, setShowUserModal] = useState(false);
-
-  const addQwiicModule = (module: Module) => {
-    setQwiicModules((prev) => [...prev, module]);
-  };
-
-  const addSensorModule = (module: Module) => {
-    setSensorModules((prev) => [...prev, module]);
-  };
-
-  const removeQwiicModule = (id: number) => {
-    setQwiicModules((prev) => prev.filter((m) => m.id !== id));
-  };
-
-  const removeSensorModule = (id: number) => {
-    setSensorModules((prev) => prev.filter((m) => m.id !== id));
-  };
 
   return (
     <div className="min-h-screen w-full relative">
@@ -226,38 +200,19 @@ function Dashboard() {
             </div>
           </div>
 
-          {/* Expandable Modules */}
-          {/* <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-[1600px] mx-auto">
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-3">Qwiic Modules</h3>
-              <AnimatePresence>
-                {qwiicModules.map((module) => (
-                  <ModuleCard
-                    key={module.id}
-                    {...module}
-                    onRemove={removeQwiicModule}
-                  />
-                ))}
-              </AnimatePresence>
-              <AddModuleButton type="qwiic" onAdd={addQwiicModule} />
+          {/* Sensor Panels — px-8 matches the PCB card's internal padding so columns align */}
+          <div className="max-w-[1600px] mx-auto px-8">
+            <div className="grid grid-cols-1 md:grid-cols-8 gap-4">
+              <div className="md:col-span-2 space-y-3">
+                <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider">RPi Sensors</h3>
+                <SensorSection source="rpi" />
+              </div>
+              <div className="md:col-span-2 space-y-3">
+                <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider">Arduino Sensors</h3>
+                <SensorSection source="arduino" />
+              </div>
             </div>
-
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white mb-3">Sensor Modules</h3>
-              <AnimatePresence>
-                {sensorModules.map((module) => (
-                  <ModuleCard
-                    key={module.id}
-                    {...module}
-                    onRemove={removeSensorModule}
-                  />
-                ))}
-              </AnimatePresence>
-              <AddModuleButton type="sensor" onAdd={addSensorModule} />
-            </div>
-
-            <div className="hidden xl:block" />
-          </div> */}
+          </div>
         </div>
 
         {/* Footer */}

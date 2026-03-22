@@ -1,6 +1,9 @@
 /**
- * WebSocket Protocol Type Definitions
- * Matches nuevo_bridge message_router.py exactly.
+ * WebSocket protocol type definitions.
+ *
+ * The transport topics now follow the v4 TLV catalog naming used by the
+ * firmware and bridge. The Zustand store may still derive merged UI-friendly
+ * views from these raw topics.
  */
 
 // ============================================================================
@@ -19,14 +22,221 @@ export interface WSCommand {
 }
 
 // ============================================================================
-// Incoming — System
+// Raw incoming topics
+// ============================================================================
+
+export interface SysStateData {
+  state: number
+  warningFlags: number
+  errorFlags: number
+  runtimeFlags: number
+  uptimeMs: number
+  lastRxMs: number
+  lastCmdMs: number
+}
+
+export interface SysInfoRspData {
+  firmwareMajor: number
+  firmwareMinor: number
+  firmwarePatch: number
+  protocolMajor: number
+  protocolMinor: number
+  boardRevision: number
+  featureMask: number
+  sensorCapabilityMask: number
+  dcMotorCount: number
+  stepperCount: number
+  servoChannelCount: number
+  ultrasonicMaxCount: number
+  userLedCount: number
+  maxNeoPixelCount: number
+  limitSwitchMask: number
+  stepperHomeLimitGpio: number[]
+}
+
+export interface SysConfigRspData {
+  motorDirMask: number
+  configuredSensorMask: number
+  neoPixelCount: number
+  heartbeatTimeoutMs: number
+}
+
+export interface SysPowerData {
+  batteryMv: number
+  rail5vMv: number
+  servoRailMv: number
+  timestamp: number
+}
+
+export interface SysDiagRspData {
+  freeSram: number
+  loopTimeAvgUs: number
+  loopTimeMaxUs: number
+  uartRxErrors: number
+  crcErrors: number
+  frameErrors: number
+  tlvErrors: number
+  oversizeErrors: number
+  txPendingBytes: number
+  txDroppedFrames: number
+}
+
+export interface ConnectionData {
+  serialConnected: boolean
+  port: string
+  baud: number
+  rxCount: number
+  txCount: number
+  crcErrors: number
+}
+
+export interface DCStateMotorData {
+  motorNumber: number
+  frameIndex: number
+  mode: number
+  faultFlags: number
+  position: number
+  velocity: number
+  targetPos: number
+  targetVel: number
+  pwmOutput: number
+  currentMa: number
+  timestamp: number
+}
+
+export interface DCStateAllData {
+  motors: DCStateMotorData[]
+}
+
+export interface DCPidRspData {
+  motorNumber: number
+  loopType: number
+  kp: number
+  ki: number
+  kd: number
+  maxOutput: number
+  maxIntegral: number
+}
+
+export interface StepperStateData {
+  stepperNumber: number
+  enabled: number
+  motionState: number
+  limitFlags: number
+  count: number
+  targetCount: number
+  currentSpeed: number
+  timestamp: number
+}
+
+export interface StepStateAllData {
+  steppers: StepperStateData[]
+}
+
+export interface StepConfigRspData {
+  stepperNumber: number
+  maxVelocity: number
+  acceleration: number
+}
+
+export interface ServoChannelState {
+  channelNumber: number
+  enabled: boolean
+  pulseUs: number
+}
+
+export interface ServoStateAllData {
+  pca9685Connected: number
+  pca9685Error: number
+  channels: ServoChannelState[]
+  timestamp: number
+}
+
+export interface IOInputStateData {
+  buttonMask: number
+  limitMask: number
+  timestamp: number
+}
+
+export interface RGBPixel {
+  r: number
+  g: number
+  b: number
+}
+
+export interface IOOutputStateData {
+  ledBrightness: number[]
+  neoPixelCount: number
+  timestamp: number
+  neoPixels: RGBPixel[]
+}
+
+export interface SensorIMUData {
+  quatW: number
+  quatX: number
+  quatY: number
+  quatZ: number
+  earthAccX: number
+  earthAccY: number
+  earthAccZ: number
+  rawAccX: number
+  rawAccY: number
+  rawAccZ: number
+  rawGyroX: number
+  rawGyroY: number
+  rawGyroZ: number
+  magX: number
+  magY: number
+  magZ: number
+  magCalibrated: number
+  timestamp: number
+}
+
+export interface SensorKinematicsData {
+  x: number
+  y: number
+  theta: number
+  vx: number
+  vy: number
+  vTheta: number
+  timestamp: number
+}
+
+export interface UltrasonicStateData {
+  status: number
+  distanceMm: number
+}
+
+export interface SensorUltrasonicAllData {
+  configuredCount: number
+  sensors: UltrasonicStateData[]
+  timestamp: number
+}
+
+export interface SensorMagCalStatusData {
+  state: number
+  sampleCount: number
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  minZ: number
+  maxZ: number
+  offsetX: number
+  offsetY: number
+  offsetZ: number
+  savedToEeprom: number
+}
+
+// ============================================================================
+// Derived UI-facing shapes
 // ============================================================================
 
 export interface SystemStatusData {
   firmwareMajor: number
   firmwareMinor: number
   firmwarePatch: number
-  state: number          // 0=INIT 1=IDLE 2=RUNNING 3=ERROR 4=ESTOP
+  state: number
   uptimeMs: number
   lastRxMs: number
   lastCmdMs: number
@@ -43,11 +253,9 @@ export interface SystemStatusData {
   heartbeatTimeoutMs: number
   limitSwitchMask: number
   stepperHomeLimitGpio: number[]
+  warningFlags: number
+  runtimeFlags: number
 }
-
-// ============================================================================
-// Incoming — Voltage
-// ============================================================================
 
 export interface VoltageData {
   batteryMv: number
@@ -55,54 +263,22 @@ export interface VoltageData {
   servoRailMv: number
 }
 
-// ============================================================================
-// Incoming — Connection stats
-// ============================================================================
-
-export interface ConnectionData {
-  serialConnected: boolean
-  port: string
-  baud: number
-  rxCount: number
-  txCount: number
-  crcErrors: number
-}
-
-// ============================================================================
-// Incoming — DC Motors (dc_status_all topic)
-// ============================================================================
-
-export interface DCMotorItem {
-  motorNumber: number   // 1-based (converted by bridge)
-  frameIndex: number    // sequential counter incremented per DC_STATUS_ALL packet
-  mode: number          // 0=disabled 1=position 2=velocity 3=pwm
-  faultFlags: number
-  position: number      // ticks
-  velocity: number      // ticks/s
-  targetPos: number
-  targetVel: number
-  pwmOutput: number     // -255 to +255
-  currentMa: number
-  posKp: number; posKi: number; posKd: number
-  velKp: number; velKi: number; velKd: number
+export interface DCMotorItem extends DCStateMotorData {
+  posKp: number
+  posKi: number
+  posKd: number
+  velKp: number
+  velKi: number
+  velKd: number
 }
 
 export interface DCStatusAllData {
   motors: DCMotorItem[]
 }
 
-// ============================================================================
-// Incoming — Stepper Motors (step_status_all topic)
-// ============================================================================
-
-export interface StepperStatusItem {
-  stepperNumber: number  // 1-based
-  enabled: number        // 0 or 1
-  motionState: number    // 0=idle 1=accel 2=cruise 3=decel 4=homing 5=fault
-  limitHit: number       // bitmask: bit0=min bit1=max
+export interface StepperStatusItem extends StepperStateData {
   commandedCount: number
-  targetCount: number
-  currentSpeed: number   // steps/s
+  limitHit: number
   maxSpeed: number
   acceleration: number
 }
@@ -111,84 +287,24 @@ export interface StepperStatusAllData {
   steppers: StepperStatusItem[]
 }
 
-// ============================================================================
-// Incoming — Servos (servo_status_all topic)
-// ============================================================================
-
-export interface ServoChannelItem {
-  channelNumber: number  // 1-based
-  enabled: boolean
-  pulseUs: number        // 0 if disabled
-}
-
-export interface ServoStatusAllData {
-  pca9685Connected: number
-  pca9685Error: number
-  channels: ServoChannelItem[]
-}
-
-// ============================================================================
-// Incoming — User I/O (io_status topic)
-// ============================================================================
+export interface ServoStatusAllData extends ServoStateAllData {}
 
 export interface IOStatusData {
-  buttonMask: number           // bit N = button N+1 (0-based mask, 1-based UI)
-  ledBrightness: number[]      // [led0, led1, led2]
+  buttonMask: number
+  limitMask: number
+  ledBrightness: number[]
   timestamp: number
-  neoPixels?: { r: number; g: number; b: number }[]
+  neoPixels?: RGBPixel[]
 }
 
-// ============================================================================
-// Incoming — Kinematics (kinematics topic)
-// ============================================================================
-
-export interface KinematicsData {
-  x: number      // mm
-  y: number      // mm
-  theta: number  // rad
-  vx: number     // mm/s
-  vy: number     // mm/s
-  vTheta: number // rad/s
+export interface SensorRangeData {
+  sensorId: number
+  sensorType: number
+  status: number
+  distanceMm: number
   timestamp: number
 }
 
-// ============================================================================
-// Incoming — IMU (imu topic)
-// ============================================================================
-
-export interface IMUData {
-  quatW: number
-  quatX: number
-  quatY: number
-  quatZ: number
-  earthAccX: number   // g
-  earthAccY: number   // g
-  earthAccZ: number   // g
-  rawAccX: number     // mg
-  rawAccY: number     // mg
-  rawAccZ: number     // mg
-  rawGyroX: number    // 0.1 DPS
-  rawGyroY: number    // 0.1 DPS
-  rawGyroZ: number    // 0.1 DPS
-  magX: number        // µT
-  magY: number        // µT
-  magZ: number        // µT
-  magCalibrated: number
-  timestamp: number
-}
-
-// ============================================================================
-// Incoming — Magnetometer calibration (mag_cal_status topic)
-// ============================================================================
-
-export interface MagCalStatusData {
-  state: number        // 0=idle 1=sampling 2=complete 3=saved 4=error
-  sampleCount: number
-  minX: number; maxX: number
-  minY: number; maxY: number
-  minZ: number; maxZ: number
-  offsetX: number
-  offsetY: number
-  offsetZ: number
-  savedToEeprom: number
-}
+export type IMUData = SensorIMUData
+export type KinematicsData = SensorKinematicsData
+export type MagCalStatusData = SensorMagCalStatusData
