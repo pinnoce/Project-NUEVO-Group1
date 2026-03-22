@@ -404,7 +404,6 @@ class MagCalibrationController:
             if self.TIMEOUT_STD_RATIO > 1e-6:
                 fit_progress = max(0.0, min(1.0, 1.0 - (self._best_std_ratio / self.TIMEOUT_STD_RATIO)))
 
-        progress = int(round((sample_progress * 0.35 + span_progress * 0.35 + ratio_progress * 0.15 + fit_progress * 0.15) * 100.0))
         ready = (
             sample_progress >= 1.0 and
             span_progress >= 1.0 and
@@ -413,6 +412,13 @@ class MagCalibrationController:
             self._best_std_ratio <= self.MAX_STD_RATIO
         )
         fallback_ready = self._can_apply_hard_iron_fallback(spans)
+        progress = int(round((sample_progress * 0.35 + span_progress * 0.35 + ratio_progress * 0.15 + fit_progress * 0.15) * 100.0))
+        if ready:
+            progress = 100
+        elif fallback_ready:
+            progress = min(progress, 90)
+        else:
+            progress = min(progress, 95)
 
         return {
             "bridgeProgress": progress,
