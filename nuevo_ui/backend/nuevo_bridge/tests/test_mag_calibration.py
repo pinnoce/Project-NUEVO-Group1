@@ -1,6 +1,6 @@
 import math
 
-from nuevo_bridge.mag_calibration import MagCalibrationController, fit_soft_iron_calibration
+from nuevo_bridge.mag_calibration import MagCalibrationController, MagCalibrationResult, fit_soft_iron_calibration
 
 
 def _mat_vec_mul(matrix, vector):
@@ -116,6 +116,34 @@ def main() -> None:
     controller._max = [max(xs), max(ys), max(zs)]
     controller.observe("sensor_imu", {"magX": planar_samples[-1][0], "magY": planar_samples[-1][1], "magZ": planar_samples[-1][2]})
     assert sent, "controller did not apply hard-iron fallback on timeout"
+    cmd, data = sent[-1]
+    assert cmd == "sensor_mag_cal_cmd"
+    assert data["command"] == 4
+    assert data["softIronMatrix"] == list((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+
+    # Timeout should prefer hard-iron fallback over a poor soft-iron fit
+    sent = []
+    controller = MagCalibrationController(sender=lambda cmd, data: sent.append((cmd, data)) or True)
+    controller.observe("sensor_mag_cal_status", {"state": 1})
+    controller._sampling = True
+    controller._start_time -= controller.MAX_DURATION_S + 1.0
+    planar_samples = [(20.0 + 0.2 * i, -15.0 + 0.1 * i, 2.0 + 0.05 * i) for i in range(160)]
+    controller._samples = list(planar_samples)
+    xs = [sample[0] for sample in controller._samples]
+    ys = [sample[1] for sample in controller._samples]
+    zs = [sample[2] for sample in controller._samples]
+    controller._min = [min(xs), min(ys), min(zs)]
+    controller._max = [max(xs), max(ys), max(zs)]
+    controller._best_result = MagCalibrationResult(
+        offset=(1.0, 2.0, 3.0),
+        matrix=(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0),
+        span=(1.0, 1.0, 1.0),
+        mean_norm=10.0,
+        std_norm=10.0,
+    )
+    controller._best_std_ratio = controller.TIMEOUT_STD_RATIO + 0.25
+    controller.observe("sensor_imu", {"magX": planar_samples[-1][0], "magY": planar_samples[-1][1], "magZ": planar_samples[-1][2]})
+    assert sent, "controller did not fall back to hard-iron calibration when timeout fit quality was poor"
     cmd, data = sent[-1]
     assert cmd == "sensor_mag_cal_cmd"
     assert data["command"] == 4

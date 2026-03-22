@@ -296,21 +296,33 @@ class MagCalibrationController:
         elapsed = now - self._start_time
         spans = [self._max[idx] - self._min[idx] for idx in range(3)]
 
-        if elapsed < self.MIN_DURATION_S or len(self._samples) < self.MIN_SAMPLES:
-            if elapsed >= self.MAX_DURATION_S:
+        if elapsed >= self.MAX_DURATION_S:
+            result = fit_soft_iron_calibration(self._samples)
+            if result is not None and result.mean_norm > 1e-6:
+                std_ratio = result.std_norm / result.mean_norm
+                self._last_std_ratio = std_ratio
+                if std_ratio < self._best_std_ratio:
+                    self._best_std_ratio = std_ratio
+                    self._best_result = result
+            else:
+                self._last_std_ratio = math.inf
+
+            if self._can_apply_hard_iron_fallback(spans):
+                self._apply_hard_iron_fallback()
+            elif self._should_apply_best_result_on_timeout():
+                self._apply_best_result()
+            else:
                 self._send_command("sensor_mag_cal_cmd", {"command": 2})
                 self._reset()
+            return
+
+        if elapsed < self.MIN_DURATION_S or len(self._samples) < self.MIN_SAMPLES:
             return
 
         if min(spans) < self.MIN_AXIS_SPAN_UT or (min(spans) / max(spans)) < self.MIN_AXIS_RATIO:
-            if elapsed >= self.MAX_DURATION_S:
-                self._send_command("sensor_mag_cal_cmd", {"command": 2})
-                self._reset()
             return
 
         if self._last_fit_attempt_time != 0.0 and (now - self._last_fit_attempt_time) < self.FIT_RETRY_INTERVAL_S:
-            if elapsed >= self.MAX_DURATION_S and self._best_result is not None and self._best_std_ratio <= self.TIMEOUT_STD_RATIO:
-                self._apply_best_result()
             return
 
         self._last_fit_attempt_time = now
@@ -327,16 +339,6 @@ class MagCalibrationController:
         else:
             self._last_std_ratio = math.inf
 
-        if elapsed >= self.MAX_DURATION_S:
-            if self._best_result is not None:
-                self._apply_best_result()
-            elif self._can_apply_hard_iron_fallback(spans):
-                self._apply_hard_iron_fallback()
-            else:
-                self._send_command("sensor_mag_cal_cmd", {"command": 2})
-                self._reset()
-            return
-
     def _apply_result(self, result: MagCalibrationResult) -> None:
         if self._send_command("sensor_mag_cal_cmd", {
             "command": 4,
@@ -350,6 +352,13 @@ class MagCalibrationController:
     def _apply_best_result(self) -> None:
         if self._best_result is not None:
             self._apply_result(self._best_result)
+
+    def _should_apply_best_result_on_timeout(self) -> bool:
+        return (
+            self._best_result is not None and
+            math.isfinite(self._best_std_ratio) and
+            self._best_std_ratio <= self.TIMEOUT_STD_RATIO
+        )
 
     def _can_apply_hard_iron_fallback(self, spans: Sequence[float]) -> bool:
         return (
