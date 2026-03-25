@@ -373,11 +373,10 @@ export function DCMotorSection({ motorId }: DCMotorSectionProps) {
             </button>
             <button
               onClick={handleHome}
-              disabled={!canHome}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all text-sm font-semibold ${
                 canHome
                   ? "backdrop-blur-xl bg-amber-500/20 border-amber-400/40 hover:bg-amber-500/30 text-white"
-                  : "bg-white/5 border-white/10 text-white/35 cursor-not-allowed"
+                  : "backdrop-blur-xl bg-white/10 border-white/20 hover:bg-white/20 text-white"
               }`}
             >
               <Home className="size-4" />
