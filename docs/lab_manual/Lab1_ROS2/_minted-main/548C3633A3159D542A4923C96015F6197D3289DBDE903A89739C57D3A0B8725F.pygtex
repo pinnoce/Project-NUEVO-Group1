@@ -1,0 +1,4 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+enable\PYGZus{}uart=1
+dtoverlay=uart0\PYGZhy{}pi5
+\end{Verbatim}

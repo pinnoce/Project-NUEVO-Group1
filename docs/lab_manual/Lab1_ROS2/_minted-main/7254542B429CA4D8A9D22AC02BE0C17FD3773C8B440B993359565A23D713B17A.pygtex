@@ -1,0 +1,4 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+git\PYG{+w}{ }clone\PYG{+w}{ }https://github.com/\PYGZlt{}your\PYGZhy{}username\PYGZgt{}/Project\PYGZhy{}NUEVO.git
+\PYG{n+nb}{cd}\PYG{+w}{ }Project\PYGZhy{}NUEVO
+\end{Verbatim}

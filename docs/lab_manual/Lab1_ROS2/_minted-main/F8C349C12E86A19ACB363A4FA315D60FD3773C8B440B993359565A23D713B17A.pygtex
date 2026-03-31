@@ -1,0 +1,6 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+\PYG{n+nv}{COMPOSE}\PYG{o}{=}ros2\PYGZus{}ws/docker/docker\PYGZhy{}compose.rpi.yml
+docker\PYG{+w}{ }compose\PYG{+w}{ }\PYGZhy{}f\PYG{+w}{ }\PYG{n+nv}{\PYGZdl{}COMPOSE}\PYG{+w}{ }build
+docker\PYG{+w}{ }compose\PYG{+w}{ }\PYGZhy{}f\PYG{+w}{ }\PYG{n+nv}{\PYGZdl{}COMPOSE}\PYG{+w}{ }up\PYG{+w}{ }\PYGZhy{}d
+docker\PYG{+w}{ }compose\PYG{+w}{ }\PYGZhy{}f\PYG{+w}{ }\PYG{n+nv}{\PYGZdl{}COMPOSE}\PYG{+w}{ }logs\PYG{+w}{ }\PYGZhy{}f\PYG{+w}{ }ros2\PYGZus{}runtime
+\end{Verbatim}

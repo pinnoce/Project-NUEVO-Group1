@@ -1,0 +1,4 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+git\PYG{+w}{ }fetch\PYG{+w}{ }upstream
+git\PYG{+w}{ }merge\PYG{+w}{ }upstream/main
+\end{Verbatim}

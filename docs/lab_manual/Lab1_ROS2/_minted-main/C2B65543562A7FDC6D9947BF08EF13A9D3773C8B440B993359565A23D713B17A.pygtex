@@ -1,0 +1,6 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+docker\PYG{+w}{ }compose\PYG{+w}{ }\PYGZhy{}f\PYG{+w}{ }\PYG{n+nv}{\PYGZdl{}COMPOSE}\PYG{+w}{ }\PYG{n+nb}{exec}\PYG{+w}{ }ros2\PYGZus{}runtime\PYG{+w}{ }bash
+\PYG{n+nb}{source}\PYG{+w}{ }/opt/ros/jazzy/setup.bash
+\PYG{n+nb}{source}\PYG{+w}{ }/ros2\PYGZus{}ws/install/setup.bash
+ros2\PYG{+w}{ }run\PYG{+w}{ }bridge\PYG{+w}{ }bridge
+\end{Verbatim}
