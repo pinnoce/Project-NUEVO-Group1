@@ -357,9 +357,21 @@ ros2 run robot robot
 
 Expected result:
 
-- the node starts
-- the log prints `robot package scaffold ready`
+- the node starts without crashing
 - `ros2 node list` now includes `/robot`
+- the example FSM in `src/robot/robot/main.py` starts and waits in the `IDLE` state
+
+The robot node is the main student application layer. It exposes a three-layer
+API over the bridge topics:
+
+- **`Robot`** (Layer 1) — full hardware abstraction: DC motors, steppers, servos,
+  LEDs, buttons, IMU, kinematics, and firmware state management
+- **`RobotFSM`** (Layer 2) — base class for writing finite state machines; provides
+  `add_transition()`, `trigger()`, and `spin()`
+- **`PathPlanner` / `PurePursuitPlanner`** (Layer 3) — waypoint-following navigation
+
+Students edit only `src/robot/robot/main.py` to implement their FSM.
+See [ROBOT_NODE_DESIGN.md](src/robot/ROBOT_NODE_DESIGN.md) for full API reference.
 
 ### Sensors node
 
@@ -393,8 +405,8 @@ Expected result:
 - the node starts
 - the log prints `vision package scaffold ready`
 
-Right now, `robot`, `sensors`, and `vision` are scaffolds. The main functional
-runtime is still the `bridge` package.
+The `robot` node is fully implemented. `sensors` and `vision` are scaffolds
+pending hardware integration.
 
 
 ## 9. Stop and Reset
@@ -442,6 +454,7 @@ ros2 run bridge bridge
 - `bridge_interfaces` is the raw firmware and bridge-facing interface package. It is not a node.
 - `bridge` is the ROS package that starts the integrated UI + ROS bridge.
 - `nuevo_bridge` is the shared Python runtime outside `ros2_ws`.
+- `robot` is the main student application layer — it wraps the bridge API and is where FSM logic lives. `sensors` and `vision` are separate packages for future hardware expansion; they are currently scaffolds.
 - `robot`, `sensors`, and `vision` are separate packages because they represent different responsibilities, not because every node needs its own package.
 - discrete operations such as firmware state changes should use services
 - continuous commands such as velocity or PWM should stay on topics
