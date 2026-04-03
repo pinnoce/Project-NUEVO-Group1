@@ -37,6 +37,7 @@ class BridgeRuntime:
         self._serial_task: Optional[asyncio.Task] = None
         self._query_task: Optional[asyncio.Task] = None
         self._started = False
+        self.last_command_error: Optional[str] = None
 
     @property
     def ros_enabled(self) -> bool:
@@ -92,9 +93,11 @@ class BridgeRuntime:
     def handle_command(self, cmd: str, data: dict) -> bool:
         result = self.message_router.handle_outgoing(cmd, data)
         if result is None:
+            self.last_command_error = self.message_router.last_command_error
             return False
         tlv_type, payload = result
         self.serial_manager.send(tlv_type, payload)
+        self.last_command_error = None
         return True
 
     def handle_ws_command(self, cmd: str, data: dict) -> bool:
