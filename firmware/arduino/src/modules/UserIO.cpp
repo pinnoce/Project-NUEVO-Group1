@@ -123,6 +123,7 @@ void UserIO::init() {
     for (uint8_t i = 0; i < LED_COUNT; i++) {
         leds_[i].brightness = 255;
         leds_[i].periodMs = 1000;
+        leds_[i].dutyCycle = 500;
         leds_[i].lastToggle = 0;
         leds_[i].state = false;
         leds_[i].breathePhase = 0;
@@ -263,13 +264,14 @@ uint8_t UserIO::getLimitStates() {
 // LED CONTROL
 // ============================================================================
 
-void UserIO::setLED(LEDId ledId, LEDMode mode, uint8_t brightness, uint16_t periodMs) {
+void UserIO::setLED(LEDId ledId, LEDMode mode, uint8_t brightness, uint16_t periodMs, uint16_t dutyCycle) {
     if (ledId >= LED_COUNT) return;
 
     LEDState& led = leds_[ledId];
     led.mode = mode;
     led.brightness = brightness;
     led.periodMs = periodMs;
+    led.dutyCycle = (dutyCycle > 1000U) ? 1000U : dutyCycle;
     led.lastToggle = millis();
     led.breathePhase = 0;
 
@@ -296,6 +298,10 @@ void UserIO::setLED(LEDId ledId, LEDMode mode, uint8_t brightness, uint16_t peri
             analogWrite(led.pin, brightness);
         }
         led.state = (brightness != 0U);
+    } else if (mode == LED_BLINK || mode == LED_BREATHE) {
+        // Animated modes should react immediately to a new command instead of
+        // waiting for the next 20 Hz user-I/O tick.
+        updateLED(led);
     }
 }
 
@@ -407,10 +413,24 @@ void UserIO::updateLED(LEDState& led) {
             break;
 
         case LED_BLINK:
-            // Toggle LED at specified period
-            if (now - led.lastToggle >= led.periodMs / 2) {
-                led.lastToggle = now;
-                led.state = !led.state;
+        {
+            const uint32_t periodMs = (led.periodMs == 0U) ? 1U : led.periodMs;
+            const uint16_t duty = (led.dutyCycle > 1000U) ? 1000U : led.dutyCycle;
+            uint32_t elapsed = now - led.lastToggle;
+
+            if (elapsed >= periodMs) {
+                led.lastToggle += (elapsed / periodMs) * periodMs;
+                elapsed = now - led.lastToggle;
+            }
+
+            const uint32_t onTimeMs = (periodMs * duty) / 1000U;
+            const bool nextState =
+                (duty >= 1000U) ? true :
+                (duty == 0U) ? false :
+                (elapsed < onTimeMs);
+
+            if (nextState != led.state) {
+                led.state = nextState;
                 if (led.pin == PIN_LED_RED) {
                     applyRedLedLevel(led.state ? led.brightness : 0);
                 } else {
@@ -418,26 +438,39 @@ void UserIO::updateLED(LEDState& led) {
                 }
             }
             break;
+        }
 
         case LED_BREATHE: {
-            // Smooth breathing via triangle-wave brightness ramp
-            uint32_t elapsed = now - led.lastToggle;
-            uint32_t phase   = (elapsed * 255) / led.periodMs;
+            // Asymmetric breathing:
+            // dutyCycle = share of the period spent ramping up, remaining time
+            // is spent ramping back down. Clamp away the 0/period singularities.
+            const uint32_t periodMs = (led.periodMs < 2U) ? 2U : led.periodMs;
+            uint16_t risePermille = led.dutyCycle;
+            if (risePermille == 0U) risePermille = 1U;
+            if (risePermille >= 1000U) risePermille = 999U;
 
-            if (phase >= 255) {
-                led.lastToggle = now;
-                phase = 0;
+            uint32_t riseMs = (periodMs * risePermille) / 1000U;
+            if (riseMs == 0U) riseMs = 1U;
+            if (riseMs >= periodMs) riseMs = periodMs - 1U;
+            const uint32_t fallMs = periodMs - riseMs;
+
+            uint32_t elapsed = now - led.lastToggle;
+            if (elapsed >= periodMs) {
+                led.lastToggle += (elapsed / periodMs) * periodMs;
+                elapsed = now - led.lastToggle;
             }
 
             uint8_t brightness;
-            if (phase < 128) {
-                brightness = (uint8_t)(phase * 2);          // Fade in
+            if (elapsed < riseMs) {
+                brightness = (uint8_t)((elapsed * 255U) / riseMs);
             } else {
-                brightness = (uint8_t)((255 - phase) * 2);  // Fade out
+                const uint32_t fallElapsed = elapsed - riseMs;
+                brightness = (uint8_t)(255U - ((fallElapsed * 255U) / fallMs));
             }
 
             // Apply per-LED brightness ceiling
             brightness = (uint8_t)((brightness * led.brightness) / 255);
+            led.state = (brightness != 0U);
 
             if (led.pin == PIN_LED_RED) {
                 applyRedLedLevel(brightness);

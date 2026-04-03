@@ -819,7 +819,7 @@ class Robot:
         brightness: int,
         mode: LEDMode | int | None = None,
         period_ms: int | None = None,
-        duty_cycle: int = 0,
+        duty_cycle: int = 500,
     ) -> None:
         """
         Control an onboard LED.
@@ -827,8 +827,9 @@ class Robot:
         maps to steady ON. Explicit modes follow the firmware contract:
         OFF=0, ON=1, BLINK=2, BREATHE=3, PWM=4.
         BLINK and BREATHE default to a 1000 ms period when none is supplied.
-        duty_cycle is forwarded for protocol compatibility but is currently
-        ignored by the firmware LED implementation.
+        duty_cycle is in permille (0-1000). For BLINK it controls the ON-time
+        share of the period. For BREATHE it controls the rise-time share of
+        the period; 500 gives a symmetric inhale/exhale.
         """
         led_id = self._require_id("led_id", led_id, 0, 4)
         clamped_brightness = max(0, min(255, int(brightness)))
@@ -844,7 +845,7 @@ class Robot:
         msg.brightness = clamped_brightness
         msg.mode       = resolved_mode
         msg.period_ms  = max(0, int(period_ms))
-        msg.duty_cycle = duty_cycle
+        msg.duty_cycle = max(0, min(1000, int(duty_cycle)))
         self._led_pub.publish(msg)
 
     def set_neopixel(self, index: int, red: int, green: int, blue: int) -> None:

@@ -35,7 +35,7 @@
  *   if (UserIO::isButtonPressed(0)) { ... }
  *
  *   // Set LED:
- *   UserIO::setLED(LED_RED, LED_MODE_BLINK, 255, 500);
+ *   UserIO::setLED(LED_RED, LED_BLINK, 255, 500, 250);
  *
  *   // Queue the NeoPixel for a state entry:
  *   UserIO::setPixelStateRunning();
@@ -197,10 +197,17 @@ public:
      *
      * @param ledId LED identifier (LED_RED, LED_GREEN, etc.)
      * @param mode LED mode (OFF, ON, PWM, BLINK, BREATHE)
-     * @param brightness Brightness (0-255, only for ON/PWM modes)
-     * @param periodMs Period in milliseconds (only for BLINK/BREATHE modes)
+     * @param brightness Brightness ceiling (0-255)
+     * @param periodMs Period in milliseconds (used by BLINK/BREATHE modes)
+     * @param dutyCycle Duty cycle in permille (0-1000). For BLINK this is the
+     *        ON-time share of each period. For BREATHE this is the rise-time
+     *        share; the remaining period is used for the fall.
      */
-    static void setLED(LEDId ledId, LEDMode mode, uint8_t brightness = 255, uint16_t periodMs = 1000);
+    static void setLED(LEDId ledId,
+                       LEDMode mode,
+                       uint8_t brightness = 255,
+                       uint16_t periodMs = 1000,
+                       uint16_t dutyCycle = 500);
 
     /**
      * @brief Turn off all LEDs
@@ -307,6 +314,7 @@ private:
         uint8_t pin;
         uint8_t brightness;
         uint16_t periodMs;
+        uint16_t dutyCycle;    // Permille timing parameter for blink/breathe
         uint32_t lastToggle;
         bool state;
         uint8_t breathePhase;   // For breathe mode (0-255)

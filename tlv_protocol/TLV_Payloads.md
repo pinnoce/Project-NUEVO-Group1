@@ -351,6 +351,15 @@ Frame layout:
 
 `PayloadSetLED` — 8 bytes
 
+| Field | Type | Notes |
+|---|---|---|
+| `ledId` | `u8` | 0-based |
+| `mode` | `u8` | `OFF/ON/BLINK/BREATHE/PWM` |
+| `brightness` | `u8` | Brightness ceiling |
+| `reserved` | `u8` | Reserved |
+| `periodMs` | `u16` | Animation period for `BLINK/BREATHE` |
+| `dutyCycle` | `u16` | Permille timing parameter; see [`docs/COMMUNICATION_PROTOCOL.md`](../docs/COMMUNICATION_PROTOCOL.md) for semantics |
+
 ### `IO_SET_NEOPIXEL = 81` ↓
 
 `PayloadSetNeoPixel` — 4 bytes

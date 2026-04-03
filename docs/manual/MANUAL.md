@@ -279,13 +279,13 @@ Limit switches can be assigned to stepper motors or DC motors for homing in `con
 | LED | Color | Pin | PWM | Firmware function |
 |-----|-------|-----|-----|-------------------|
 | LED1 | Green | 44 | Yes | System OK / user-controlled |
-| LED2 | Red | 5 | No | Error / low battery |
+| LED2 | Red | 5 | Yes | Error / low battery |
 | LED3 | Blue | 45 | Yes | User-controlled (exposed) |
 | LED4 | Orange | 46 | Yes | User-controlled (exposed) |
 | LED5 | Purple | 47 | No | User-controlled (exposed) |
 | NeoPixel | RGB | 42 | — | Automatic system-state indicator |
 
-> **Note:** LED2 (pin 5) and LED5 (pin 47) are digital ON/OFF only — they cannot be dimmed via PWM due to timer conflicts with the stepper and DC motor control hardware.
+> **Note:** LED5 (pin 47) is digital ON/OFF only. LED2 (pin 5) supports PWM and animated dimming via the firmware LED controller.
 
 The **NeoPixel** (WS2812B) on pin 42 automatically reflects the firmware system state and is not user-controlled. An extension socket (`J_NEOPIXEL`) allows external RGB strips to share the same data line.
 
@@ -882,8 +882,8 @@ Open the Arduino IDE Serial Monitor at 115200 baud to view this output.
 - Check that `JP_LIM_V` is set to the voltage matching your sensor (5V or 3.3V)
 - Verify the switch type: normally-open switches should be open (HIGH) at rest with INPUT_PULLUP
 
-**LED_RED or LED_PURPLE not dimming:**
-- These are digital only — they cannot produce PWM. Use ON/OFF control only.
+**LED_PURPLE not dimming:**
+- LED_PURPLE is digital only — use ON/OFF control only.
 
 ---
 

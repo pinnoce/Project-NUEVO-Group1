@@ -164,7 +164,7 @@ handle.cancel()                    # abort
 | `get_limit(limit_id) → bool` | no | same approach as buttons; ids 1–8 on current firmware |
 | `was_limit_triggered(limit_id, consume=True) → bool` | no | rising-edge latch captured in ROS callback |
 | `wait_for_limit(limit_id, timeout=None) → bool` | yes | blocks until limit triggered |
-| `set_led(led_id, brightness, mode=None, period_ms=None, duty_cycle=0)` | no | publishes `IOSetLed`; `mode` uses `LEDMode` (`OFF`, `ON`, `BLINK`, `BREATHE`, `PWM`); blink/breathe default to 1000 ms |
+| `set_led(led_id, brightness, mode=None, period_ms=None, duty_cycle=500)` | no | publishes `IOSetLed`; `mode` uses `LEDMode` (`OFF`, `ON`, `BLINK`, `BREATHE`, `PWM`); blink/breathe default to 1000 ms and `duty_cycle=500` |
 | `set_neopixel(index, r, g, b)` | no | publishes `IOSetNeopixel`; index is 0-based |
 
 `wait_for_button` and `was_button_pressed` use work done inside the IO
@@ -172,6 +172,10 @@ subscription callback when the requested bit transitions from 0→1, so short
 button presses are not missed even if the FSM loop runs slower. For simple
 FSMs that watch one button per state, `get_button()` is often the cleaner
 choice because it avoids carrying a latched edge across a later state change.
+
+For LED timing, `duty_cycle` is in permille (`0..1000`). In `BLINK` mode it is
+the ON-time share of the full period. In `BREATHE` mode it is the rise-time
+share of the full period, with the remaining time used for the fade back down.
 
 #### IMU
 

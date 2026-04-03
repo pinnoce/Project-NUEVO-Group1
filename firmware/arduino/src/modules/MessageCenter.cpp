@@ -1439,7 +1439,8 @@ void MessageCenter::handleSetLED(const PayloadSetLED *payload)
     UserIO::setLED((LEDId)payload->ledId,
                    (LEDMode)payload->mode,
                    payload->brightness,
-                   payload->periodMs);
+                   payload->periodMs,
+                   payload->dutyCycle);
     pendingIOOutputState_ = true;
 }
 

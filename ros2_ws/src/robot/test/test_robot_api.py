@@ -169,6 +169,14 @@ class RobotApiTests(unittest.TestCase):
         msg = self.node.publishers["/io_set_led"].published[-1]
         self.assertEqual(msg.mode, 3)
         self.assertEqual(msg.period_ms, 1000)
+        self.assertEqual(msg.duty_cycle, 500)
+
+    def test_blink_defaults_to_symmetric_duty_cycle(self) -> None:
+        self.robot.set_led(1, 255, mode=self.hardware_map.LEDMode.BLINK)
+        msg = self.node.publishers["/io_set_led"].published[-1]
+        self.assertEqual(msg.mode, 2)
+        self.assertEqual(msg.period_ms, 1000)
+        self.assertEqual(msg.duty_cycle, 500)
 
     def test_invalid_motor_number_fails_fast(self) -> None:
         with self.assertRaisesRegex(ValueError, "motor_id must be between 1 and 4"):
