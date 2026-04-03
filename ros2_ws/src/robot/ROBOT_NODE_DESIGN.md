@@ -169,7 +169,9 @@ handle.cancel()                    # abort
 
 `wait_for_button` and `was_button_pressed` use work done inside the IO
 subscription callback when the requested bit transitions from 0→1, so short
-button presses are not missed even if the FSM loop runs slower.
+button presses are not missed even if the FSM loop runs slower. For simple
+FSMs that watch one button per state, `get_button()` is often the cleaner
+choice because it avoids carrying a latched edge across a later state change.
 
 #### IMU
 
@@ -227,7 +229,7 @@ class MyFSM(RobotFSM):
 
     def update(self):
         if self.get_state() == "IDLE":
-            if self.robot.was_button_pressed(1):
+            if self.robot.get_button(1):
                 self.trigger("start")
 
     def _start_move(self):

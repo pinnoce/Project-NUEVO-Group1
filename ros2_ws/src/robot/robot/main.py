@@ -77,13 +77,15 @@ class MyFSM(RobotFSM):
             self.trigger("ready")
 
         elif state == "IDLE":
-            # Button edges are latched in Robot's ROS callback, so the FSM does
-            # not need to sample faster than the raw input telemetry.
-            if self.robot.was_button_pressed(Button.BTN_1):
+            # This demo only listens to one button in each state, so polling
+            # the current level is enough. Keep LED writes out of update() so
+            # button handling stays responsive and the bridge does not get
+            # flooded with repeated output commands.
+            if self.robot.get_button(Button.BTN_1):
                 self.trigger("to_moving")
 
         elif state == "MOVING":
-            if self.robot.was_button_pressed(Button.BTN_2):
+            if self.robot.get_button(Button.BTN_2):
                 self.trigger("to_idle")
 
     # ------------------------------------------------------------------
@@ -97,20 +99,28 @@ class MyFSM(RobotFSM):
     def _on_ready(self) -> None:
         """Called once when leaving INIT. Starts the firmware."""
         self.robot.set_state(FirmwareState.RUNNING)
-        self.robot.set_led(LED.GREEN, 0)
-        self.robot.set_led(LED.RED, 255)
+        self._show_idle_leds()
+        print("[FSM] IDLE")
 
     def _on_to_moving(self) -> None:
         """Called once when entering MOVING."""
-        self.robot.set_led(LED.RED, 0)
-        self.robot.set_led(LED.GREEN, 255)
+        self._show_moving_leds()
         self.robot.set_velocity(100, 0.0)  # 100 mm/s forward, 0 deg/s rotation
+        print("[FSM] MOVING")
 
     def _on_to_idle(self) -> None:
         """Called once when entering IDLE from MOVING."""
         self.robot.stop()
+        self._show_idle_leds()
+        print("[FSM] IDLE")
+
+    def _show_idle_leds(self) -> None:
         self.robot.set_led(LED.GREEN, 0)
         self.robot.set_led(LED.RED, 255)
+
+    def _show_moving_leds(self) -> None:
+        self.robot.set_led(LED.RED, 0)
+        self.robot.set_led(LED.GREEN, 255)
 
 
 def run(robot: Robot) -> None:

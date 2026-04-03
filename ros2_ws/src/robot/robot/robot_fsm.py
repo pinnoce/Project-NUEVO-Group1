@@ -20,7 +20,7 @@ class RobotFSM:
                 self.add_transition("MOVING", "done", "IDLE",  action=self._finish)
 
             def update(self):
-                if self.get_state() == "IDLE" and self.robot.was_button_pressed(Button.BTN_1):
+                if self.get_state() == "IDLE" and self.robot.get_button(Button.BTN_1):
                     self.trigger("start")
 
             def _begin(self):
