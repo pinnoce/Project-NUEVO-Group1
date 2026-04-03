@@ -80,6 +80,7 @@ class MessageRouter:
         self._dc_pid_cache: Dict[Tuple[int, int], dict] = {}
         self._step_config_cache: Dict[int, dict] = {}
         self._latest_ws_messages: Dict[str, dict] = {}
+        self._last_command_error: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Transport
@@ -87,6 +88,13 @@ class MessageRouter:
 
     def attach_transport_sender(self, sender: Callable[[int, ctypes.Structure], None]) -> None:
         self._transport_sender = sender
+
+    @property
+    def last_command_error(self) -> Optional[str]:
+        return self._last_command_error
+
+    def _record_command_error(self, message: Optional[str]) -> None:
+        self._last_command_error = message
 
     def send_wire_command(self, cmd: str, data: Dict[str, Any]) -> bool:
         result = self.handle_outgoing(cmd, data)
@@ -702,18 +710,22 @@ class MessageRouter:
         }
 
         if cmd not in registry:
-            print(f"[Router] Unknown command: {cmd!r}")
+            self._record_command_error(f"Unknown command {cmd!r}.")
+            print(f"[Router] {self._last_command_error}")
             return None
 
         tlv_type, encode_fn = registry[cmd]
         try:
             payload = encode_fn(data)
         except Exception as exc:
-            print(f"[Router] Encode error for {cmd!r}: {exc}")
+            self._record_command_error(f"Encode error for {cmd!r}: {exc}")
+            print(f"[Router] {self._last_command_error}")
             return None
 
         if payload is None:
-            print(f"[Router] Rejected command {cmd!r}: validation failed (data={data})")
+            self._record_command_error(f"Rejected command {cmd!r}: validation failed for data={data}")
+            print(f"[Router] {self._last_command_error}")
             return None
 
+        self._record_command_error(None)
         return (tlv_type, payload)

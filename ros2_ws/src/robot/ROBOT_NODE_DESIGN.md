@@ -86,6 +86,7 @@ FSM/path-planner threads read it.
 | Method | Blocking | Notes |
 |---|---|---|
 | `set_velocity(linear, angular)` | no | body-frame: linear in user-units/s, angular in rad/s; firmware uses diff-drive mixing |
+| `set_left_wheel(motor_id)` / `set_right_wheel(motor_id)` | no | configure which DC motors are used by diff-drive helpers |
 | `set_motor_velocity(motor_id, velocity)` | no | per-motor; velocity in user-units/s → ticks/s |
 | `stop()` | no | zero velocity on both drive motors; does NOT ESTOP |
 
@@ -158,14 +159,19 @@ handle.cancel()                    # abort
 | Method | Blocking | Notes |
 |---|---|---|
 | `get_button(button_id) → bool` | no | reads bitmask from cached `IOInputState`; ids 1–16 |
+| `was_button_pressed(button_id, consume=True) → bool` | no | rising-edge latch captured in ROS callback |
 | `wait_for_button(button_id, timeout=None) → bool` | yes | blocks until button pressed or timeout |
 | `get_limit(limit_id) → bool` | no | same approach as buttons |
+| `was_limit_triggered(limit_id, consume=True) → bool` | no | rising-edge latch captured in ROS callback |
 | `wait_for_limit(limit_id, timeout=None) → bool` | yes | blocks until limit triggered |
-| `set_led(channel, r, g, b)` | no | publishes `IOSetLed` |
-| `set_neopixel(index, r, g, b)` | no | publishes `IOSetNeopixel` |
+| `set_led(led_id, brightness, mode=None)` | no | publishes `IOSetLed`; LED IDs follow firmware I/O numbering |
+| `set_neopixel(index, r, g, b)` | no | publishes `IOSetNeopixel`; index is 0-based |
 
-`wait_for_button` implementation uses a `threading.Event` that is set by the IO
-subscription callback when the requested bit transitions from 0→1.
+`wait_for_button` and `was_button_pressed` use work done inside the IO
+subscription callback when the requested bit transitions from 0→1, so short
+button presses are not missed even if the FSM loop runs slower. For simple
+FSMs that watch one button per state, `get_button()` is often the cleaner
+choice because it avoids carrying a latched edge across a later state change.
 
 #### IMU
 
@@ -202,7 +208,7 @@ class RobotFSM:
     # --- runtime API ---
     def trigger(self, event: str): ...   # fire an event (thread-safe)
     def get_state(self) -> str: ...
-    def spin(self, hz: float = 10): ... # runs the FSM update loop; blocks
+    def spin(self, hz: float = 50): ... # runs the FSM update loop; blocks
 
     # --- hooks for subclasses ---
     def on_enter(self, state: str): ... # called on state entry; override per-state
@@ -230,7 +236,7 @@ class MyFSM(RobotFSM):
         self.robot.move_to(500, 0, 200, blocking=False)
 
     def _celebrate(self):
-        self.robot.set_neopixel(0, 0, 255, 0)
+        self.robot.set_led(1, 255)
 ```
 
 ---
@@ -300,8 +306,11 @@ These are constructor defaults in `Robot` and should match `firmware/arduino/src
 | `wheel_diameter_mm` | 74.0 | `WHEEL_DIAMETER_MM` |
 | `wheel_base_mm` | 333.0 | `WHEEL_BASE_MM` |
 | `encoder_ppr` | 1440 | `ENCODER_PPR × ENCODER_4X` |
-| Left drive motor | 0 | `ODOM_LEFT_MOTOR` |
-| Right drive motor | 1 | `ODOM_RIGHT_MOTOR` |
+| Default left drive motor | 1 | `ODOM_LEFT_MOTOR + 1` |
+| Default right drive motor | 2 | `ODOM_RIGHT_MOTOR + 1` |
+
+Student code can override the left/right wheel mapping at startup via
+`set_left_wheel()` / `set_right_wheel()` if the robot is wired differently.
 
 ---
 
@@ -311,6 +320,7 @@ These are constructor defaults in `Robot` and should match `firmware/arduino/src
 robot/
 ├── robot/
 │   ├── __init__.py
+│   ├── hardware_map.py        # user-facing IDs + firmware-derived timing constants
 │   ├── robot_node.py          # ROS node; constructs Robot, spins ROS, calls main.run()
 │   ├── robot.py               # Robot class (Layer 1)
 │   ├── robot_fsm.py           # RobotFSM base class (Layer 2)

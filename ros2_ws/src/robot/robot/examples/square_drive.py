@@ -34,6 +34,7 @@ TUNING
 
 from robot.robot import Robot, FirmwareState
 from robot.robot_fsm import RobotFSM
+from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED
 
 SIDE_LENGTH_MM = 1000   # length of each side in mm
 DRIVE_SPEED    = 200    # mm/s
@@ -71,7 +72,7 @@ class SquareFSM(RobotFSM):
     def update(self) -> None:
         state = self.get_state()
         if state == "IDLE":
-            if self.robot.get_button(1):
+            if self.robot.was_button_pressed(Button.BTN_1):
                 self.trigger("start")
         elif state in self.SIDES:
             if not self.robot.is_moving():
@@ -80,7 +81,7 @@ class SquareFSM(RobotFSM):
             if not self.robot.is_moving():
                 self.trigger("turned")
         # Emergency stop button
-        if self.robot.get_button(2):
+        if self.robot.was_button_pressed(Button.BTN_2):
             self.trigger("estop")
 
     def _begin_side(self) -> None:
@@ -91,18 +92,25 @@ class SquareFSM(RobotFSM):
         dy = self._side_dir[1] * scale
         self.robot.set_state(FirmwareState.RUNNING)
         self.robot.move_to(x + dx, y + dy, DRIVE_SPEED, blocking=False)
+        self.robot.set_led(LED.GREEN, 255)
+        self.robot.set_led(LED.ORANGE, 0)
+        self.robot.set_led(LED.RED, 0)
 
     def _begin_turn(self) -> None:
         # Rotate direction vector 90° CCW for next side
         dx, dy = self._side_dir
         self._side_dir = (-dy, dx)
         self.robot.turn_by(90, blocking=False, tolerance_deg=3)
+        self.robot.set_led(LED.GREEN, 0)
+        self.robot.set_led(LED.ORANGE, 255)
 
     def _finish(self) -> None:
         self.robot.stop()
-        self.robot.set_neopixel(0, 0, 255, 0)   # green = done
+        self.robot.set_led(LED.ORANGE, 0)
+        self.robot.set_led(LED.GREEN, 255)
+        self.robot.set_led(LED.RED, 0)
 
 
 def run(robot: Robot) -> None:
     fsm = SquareFSM(robot)
-    fsm.spin(hz=20)
+    fsm.spin(hz=DEFAULT_FSM_HZ)

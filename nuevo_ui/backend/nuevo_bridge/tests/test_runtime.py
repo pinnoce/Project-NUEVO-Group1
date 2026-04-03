@@ -62,6 +62,17 @@ class BridgeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await runtime.stop()
 
+    async def test_invalid_command_surfaces_rejection_reason(self):
+        runtime = BridgeRuntime(serial_manager_factory=_FakeSerialManager)
+
+        await runtime.start()
+        try:
+            ok = runtime.handle_command("dc_enable", {"motorNumber": 0, "mode": 2})
+            self.assertFalse(ok)
+            self.assertIn("validation failed", runtime.last_command_error)
+        finally:
+            await runtime.stop()
+
     async def test_ros_mode_attaches_external_message_sink(self):
         controllers = []
 

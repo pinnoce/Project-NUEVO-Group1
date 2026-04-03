@@ -12,25 +12,13 @@ To run:
 
 from robot.robot import Robot, FirmwareState
 from robot.robot_fsm import RobotFSM
+from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
 
 
-# ---------------------------------------------------------------------------
-# LED identifiers for set_led()
-#
-# Usage:
-#   self.robot.set_led(LED.GREEN, 255)   # full brightness
-#   self.robot.set_led(LED.RED,   0)     # off
-# ---------------------------------------------------------------------------
-
-class LED:
-    RED    = 0   # Discrete red LED    (PWM)
-    GREEN  = 1   # Discrete green LED  (PWM)
-    BLUE   = 2   # Discrete blue LED   (PWM)
-    ORANGE = 3   # Discrete orange LED (PWM)
-    PURPLE = 4   # Discrete purple LED (PWM)
-
-    OFF = 0      # Brightness: off
-    ON  = 255    # Brightness: full on
+# Drive-wheel mapping for this robot build.
+# Change these if the left/right wheels are wired to different DC motor ports.
+LEFT_WHEEL_MOTOR = Motor.DC_M1
+RIGHT_WHEEL_MOTOR = Motor.DC_M2
 
 
 class MyFSM(RobotFSM):
@@ -67,11 +55,8 @@ class MyFSM(RobotFSM):
         self.add_transition("IDLE",   "to_moving", "MOVING", action=self._on_to_moving)
         self.add_transition("MOVING", "to_idle",   "IDLE",   action=self._on_to_idle)
 
-        # Tracks the previous button state for edge detection (see _button_pressed)
-        self._btn_prev: dict[int, bool] = {}
-
     # ------------------------------------------------------------------
-    # Part 2 — Continuous logic (runs every spin cycle, ~20 Hz)
+    # Part 2 — Continuous logic (runs every spin cycle, ~50 Hz by default)
     #
     # update() is called repeatedly by spin(). Use it to:
     #   - read sensors or buttons
@@ -92,21 +77,15 @@ class MyFSM(RobotFSM):
             self.trigger("ready")
 
         elif state == "IDLE":
-            # Continuous output while IDLE — runs every cycle
-            self.robot.set_led(LED.GREEN, LED.OFF)
-            self.robot.set_led(LED.RED,   LED.ON)
-
-            # _button_pressed() fires only on the rising edge (moment of press).
-            # This prevents the trigger from firing repeatedly while held down.
-            if self._button_pressed(1):
+            # This demo only listens to one button in each state, so polling
+            # the current level is enough. Keep LED writes out of update() so
+            # button handling stays responsive and the bridge does not get
+            # flooded with repeated output commands.
+            if self.robot.get_button(Button.BTN_1):
                 self.trigger("to_moving")
 
         elif state == "MOVING":
-            # Continuous output while MOVING — runs every cycle
-            self.robot.set_led(LED.RED,   LED.OFF)
-            self.robot.set_led(LED.GREEN, LED.ON)
-
-            if self._button_pressed(2):
+            if self.robot.get_button(Button.BTN_2):
                 self.trigger("to_idle")
 
     # ------------------------------------------------------------------
@@ -120,32 +99,32 @@ class MyFSM(RobotFSM):
     def _on_ready(self) -> None:
         """Called once when leaving INIT. Starts the firmware."""
         self.robot.set_state(FirmwareState.RUNNING)
+        self._show_idle_leds()
+        print("[FSM] IDLE")
 
     def _on_to_moving(self) -> None:
         """Called once when entering MOVING."""
+        self._show_moving_leds()
         self.robot.set_velocity(100, 0.0)  # 100 mm/s forward, 0 deg/s rotation
+        print("[FSM] MOVING")
 
     def _on_to_idle(self) -> None:
         """Called once when entering IDLE from MOVING."""
         self.robot.stop()
+        self._show_idle_leds()
+        print("[FSM] IDLE")
 
-    # ------------------------------------------------------------------
-    # Helper — edge-detection for buttons
-    #
-    # get_button() returns True the entire time a button is held down.
-    # In update() running at 20 Hz, one press would fire trigger() up to
-    # 20 times per second. _button_pressed() detects only the rising edge
-    # (the moment the button goes from not-pressed to pressed), so each
-    # physical press fires the trigger exactly once.
-    # ------------------------------------------------------------------
+    def _show_idle_leds(self) -> None:
+        self.robot.set_led(LED.GREEN, 0)
+        self.robot.set_led(LED.RED, 255)
 
-    def _button_pressed(self, button_id: int) -> bool:
-        current = self.robot.get_button(button_id)
-        prev = self._btn_prev.get(button_id, False)
-        self._btn_prev[button_id] = current
-        return current and not prev
+    def _show_moving_leds(self) -> None:
+        self.robot.set_led(LED.RED, 0)
+        self.robot.set_led(LED.GREEN, 255)
 
 
 def run(robot: Robot) -> None:
+    robot.set_left_wheel(LEFT_WHEEL_MOTOR)
+    robot.set_right_wheel(RIGHT_WHEEL_MOTOR)
     fsm = MyFSM(robot)
-    fsm.spin(hz=20)
+    fsm.spin(hz=DEFAULT_FSM_HZ)

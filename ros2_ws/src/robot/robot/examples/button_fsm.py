@@ -20,15 +20,15 @@ States and transitions:
 
     IDLE ──(button 1)──► FORWARD   robot drives forward at 150 mm/s
     FORWARD ──(button 2)──► TURNING  robot turns 90° CCW in place
-    TURNING ──(turn done)──► IDLE    robot stops; NeoPixel flashes red
+    TURNING ──(turn done)──► IDLE    robot stops; discrete LEDs indicate state
 
 Button 1 always restarts from IDLE.
 Button 3 triggers ESTOP from any state.
 
 TWO STYLES OF BUTTON HANDLING SHOWN
 --------------------------------------
-1. Polling in update()  — used for button 1 and 3.
-   Fast response, but update() runs at the spin rate (default 20 Hz).
+1. Latched edge polling in update()  — used for buttons 1, 2, and 3.
+   Fast response without missing short button presses.
 
 2. Blocking wait in an action — used to confirm the turn is done.
    Blocks the FSM loop; only use for short waits.
@@ -38,6 +38,7 @@ import time
 
 from robot.robot import Robot, FirmwareState
 from robot.robot_fsm import RobotFSM
+from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED
 
 
 class ButtonFSM(RobotFSM):
@@ -60,21 +61,19 @@ class ButtonFSM(RobotFSM):
     # ------------------------------------------------------------------
 
     def update(self) -> None:
-        # Button 3 — emergency stop from any state (polling style)
-        if self.robot.get_button(3):
+        # Button 3 — emergency stop from any state
+        if self.robot.was_button_pressed(Button.BTN_3):
             self.trigger("estop")
             return
 
         state = self.get_state()
 
         if state == "IDLE":
-            # Button 1 — start driving (polling style)
-            if self.robot.get_button(1):
+            if self.robot.was_button_pressed(Button.BTN_1):
                 self.trigger("go")
 
         elif state == "FORWARD":
-            # Button 2 — begin turn (polling style)
-            if self.robot.get_button(2):
+            if self.robot.was_button_pressed(Button.BTN_2):
                 self.trigger("turn")
 
         elif state == "TURNING":
@@ -89,33 +88,42 @@ class ButtonFSM(RobotFSM):
     def _start_forward(self) -> None:
         self.robot.set_state(FirmwareState.RUNNING)
         self.robot.set_velocity(linear=150, angular_deg_s=0)
-        self.robot.set_neopixel(0, 0, 100, 255)   # blue = moving
+        self._show_led(LED.BLUE)
 
     def _start_turn(self) -> None:
         self.robot.stop()
         # Non-blocking turn; update() watches is_moving() for completion
         self.robot.turn_by(90, blocking=False, tolerance_deg=3)
-        self.robot.set_neopixel(0, 255, 165, 0)   # orange = turning
+        self._show_led(LED.ORANGE)
 
     def _on_idle(self) -> None:
         self.robot.stop()
-        # Flash NeoPixel red three times to signal return to IDLE
+        # Flash red LED three times to signal return to IDLE
         for _ in range(3):
-            self.robot.set_neopixel(0, 255, 0, 0)
+            self.robot.set_led(LED.RED, 255)
             time.sleep(0.15)
-            self.robot.set_neopixel(0, 0, 0, 0)
+            self.robot.set_led(LED.RED, 0)
             time.sleep(0.15)
+        self._show_led(LED.GREEN)
 
     def _emergency_stop(self) -> None:
         self.robot.cancel_motion()
         self.robot.stop()
-        self.robot.set_neopixel(0, 255, 0, 0)   # solid red
+        self._show_led(LED.RED)
         # Blocking wait: hold here until button 1 is pressed to re-arm
         # This intentionally blocks the FSM loop — the robot is stopped.
-        self.robot.wait_for_button(1)
-        self.robot.set_neopixel(0, 0, 0, 0)
+        self.robot.wait_for_button(Button.BTN_1)
+        self._clear_leds()
+
+    def _clear_leds(self) -> None:
+        for led in (LED.RED, LED.GREEN, LED.BLUE, LED.ORANGE, LED.PURPLE):
+            self.robot.set_led(led, 0)
+
+    def _show_led(self, led: LED) -> None:
+        self._clear_leds()
+        self.robot.set_led(led, 255)
 
 
 def run(robot: Robot) -> None:
     fsm = ButtonFSM(robot)
-    fsm.spin(hz=20)
+    fsm.spin(hz=DEFAULT_FSM_HZ)

@@ -36,6 +36,8 @@ from bridge_interfaces.msg import (
 )
 from bridge_interfaces.srv import SetFirmwareState
 
+from robot.hardware_map import DEFAULT_NAV_HZ, Motor
+
 
 # =============================================================================
 # Public enums
@@ -97,22 +99,26 @@ class Robot:
     construction time (default: mm). Angles are always in degrees for the
     public API; internally radians are used.
 
-    Motor IDs are 0-based (0–3). Stepper IDs are 0-based (0–3).
-    Servo channels are 0-based (0–15).
+    Motor IDs are 1-based (1–4). Stepper IDs are 1-based (1–4).
+    Servo channels are 1-based (1–16).
+    Button and limit IDs are 1-based (1–16).
+
+    LED IDs and NeoPixel indices follow the current firmware I/O numbering and
+    remain 0-based.
 
     Hardware defaults match firmware/arduino/src/config.h:
         WHEEL_DIAMETER_MM = 74.0
         WHEEL_BASE_MM     = 333.0
         ENCODER_PPR       = 1440  (4× mode)
-        LEFT_MOTOR        = 0
-        RIGHT_MOTOR       = 1
+        DEFAULT_LEFT_WHEEL_MOTOR  = 1
+        DEFAULT_RIGHT_WHEEL_MOTOR = 2
     """
 
     WHEEL_DIAMETER_MM: float = 74.0
     WHEEL_BASE_MM:     float = 333.0
     ENCODER_PPR:       int   = 1440
-    LEFT_MOTOR:        int   = 0
-    RIGHT_MOTOR:       int   = 1
+    DEFAULT_LEFT_WHEEL_MOTOR:  int = int(Motor.DC_M1)
+    DEFAULT_RIGHT_WHEEL_MOTOR: int = int(Motor.DC_M2)
 
     # Servo pulse range (standard hobby servo)
     _SERVO_MIN_US: int = 1000
@@ -132,6 +138,8 @@ class Robot:
         self._wheel_base       = wheel_base_mm
         self._encoder_ppr      = encoder_ppr
         self._ticks_per_mm     = encoder_ppr / (math.pi * wheel_diameter_mm)
+        self._left_wheel_motor = self.DEFAULT_LEFT_WHEEL_MOTOR
+        self._right_wheel_motor = self.DEFAULT_RIGHT_WHEEL_MOTOR
         self._lock             = threading.Lock()
 
         # ── Cached firmware state ─────────────────────────────────────────────
@@ -145,6 +153,9 @@ class Robot:
         self._vel:     tuple = (0.0, 0.0, 0.0)  # vx_mm_s, vy_mm_s, vtheta_rad_s
         self._buttons: int   = 0
         self._limits:  int   = 0
+        self._button_edges: int = 0
+        self._limit_edges: int = 0
+        self._have_io_input: bool = False
 
         # ── Events ────────────────────────────────────────────────────────────
         self._pose_event: threading.Event = threading.Event()
@@ -225,19 +236,22 @@ class Robot:
 
     def _on_io_input(self, msg: IOInputState) -> None:
         with self._lock:
-            prev_btn = self._buttons
-            prev_lim = self._limits
+            prev_btn = self._buttons if self._have_io_input else msg.button_mask
+            prev_lim = self._limits if self._have_io_input else msg.limit_mask
             self._buttons = msg.button_mask
             self._limits  = msg.limit_mask
+            self._button_edges |= msg.button_mask & ~prev_btn
+            self._limit_edges |= msg.limit_mask & ~prev_lim
+            self._have_io_input = True
 
         # Fire events on rising edges (outside lock to avoid deadlock)
         for bit in range(16):
             bid = bit + 1
-            if (msg.button_mask >> bit) & 1 and not (prev_btn >> bit) & 1:
+            if ((msg.button_mask >> bit) & 1) and not ((prev_btn >> bit) & 1):
                 ev = self._button_events.get(bid)
                 if ev:
                     ev.set()
-            if (msg.limit_mask >> bit) & 1 and not (prev_lim >> bit) & 1:
+            if ((msg.limit_mask >> bit) & 1) and not ((prev_lim >> bit) & 1):
                 ev = self._limit_events.get(bid)
                 if ev:
                     ev.set()
@@ -331,6 +345,7 @@ class Robot:
 
     def set_motor_velocity(self, motor_id: int, velocity: float) -> None:
         """Command a single DC motor by velocity in user units/s."""
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         self._send_motor_velocity_mm(motor_id, velocity * self._unit.value)
 
     def stop(self) -> None:
@@ -338,8 +353,27 @@ class Robot:
         Zero velocity on both drive motors. The firmware stays in RUNNING state.
         Use estop() for an emergency stop.
         """
-        self._send_motor_velocity_mm(self.LEFT_MOTOR,  0.0)
-        self._send_motor_velocity_mm(self.RIGHT_MOTOR, 0.0)
+        self._send_motor_velocity_mm(self._left_wheel_motor, 0.0)
+        self._send_motor_velocity_mm(self._right_wheel_motor, 0.0)
+
+    def set_left_wheel(self, motor_id: int) -> None:
+        """Configure which DC motor drives the left wheel for diff-drive commands."""
+        self._left_wheel_motor = self._require_id("motor_id", motor_id, 1, 4)
+
+    def set_right_wheel(self, motor_id: int) -> None:
+        """Configure which DC motor drives the right wheel for diff-drive commands."""
+        self._right_wheel_motor = self._require_id("motor_id", motor_id, 1, 4)
+
+    def set_drive_wheels(self, left_motor_id: int, right_motor_id: int) -> None:
+        """Configure both drive-wheel motors for diff-drive commands."""
+        self.set_left_wheel(left_motor_id)
+        self.set_right_wheel(right_motor_id)
+
+    def get_left_wheel(self) -> int:
+        return self._left_wheel_motor
+
+    def get_right_wheel(self) -> int:
+        return self._right_wheel_motor
 
     # =========================================================================
     # Navigation  (higher-level, runs a background thread)
@@ -435,6 +469,7 @@ class Robot:
 
     def set_motor_pwm(self, motor_id: int, pwm: int) -> None:
         """Raw PWM command, −255 … 255."""
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCSetPwm()
         msg.motor_number = motor_id
         msg.pwm = int(pwm)
@@ -453,6 +488,7 @@ class Robot:
         Move a DC motor to an absolute encoder position.
         Returns True when within tolerance, False on timeout.
         """
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCSetPosition()
         msg.motor_number  = motor_id
         msg.target_ticks  = int(ticks)
@@ -467,6 +503,7 @@ class Robot:
         Enable a DC motor.
         mode: 1=position, 2=velocity (default), 3=pwm
         """
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCEnable()
         msg.motor_number = motor_id
         msg.mode = mode
@@ -474,6 +511,7 @@ class Robot:
 
     def disable_motor(self, motor_id: int) -> None:
         """Disable a DC motor (mode 0)."""
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCEnable()
         msg.motor_number = motor_id
         msg.mode = 0
@@ -492,6 +530,7 @@ class Robot:
         direction: +1 or -1
         Returns True when homing completes, False on timeout.
         """
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCHome()
         msg.motor_number  = motor_id
         msg.direction     = direction
@@ -503,6 +542,7 @@ class Robot:
 
     def reset_motor_position(self, motor_id: int) -> None:
         """Zero the encoder position for a DC motor."""
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCResetPosition()
         msg.motor_number = motor_id
         self._dc_rst_pub.publish(msg)
@@ -521,6 +561,7 @@ class Robot:
         Set PID gains for a DC motor.
         loop_type: 1=position, 2=velocity
         """
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCPidSet()
         msg.motor_number  = motor_id
         msg.loop_type     = loop_type
@@ -536,6 +577,7 @@ class Robot:
         Request PID parameters from firmware. Response arrives on /dc_pid_rsp topic.
         loop_type: 1=position, 2=velocity
         """
+        motor_id = self._require_id("motor_id", motor_id, 1, 4)
         msg = DCPidReq()
         msg.motor_number = motor_id
         msg.loop_type    = loop_type
@@ -552,6 +594,7 @@ class Robot:
 
     def step_enable(self, stepper_id: int) -> None:
         """Enable a stepper motor."""
+        stepper_id = self._require_id("stepper_id", stepper_id, 1, 4)
         msg = StepEnable()
         msg.stepper_number = stepper_id
         msg.enable = True
@@ -559,6 +602,7 @@ class Robot:
 
     def step_disable(self, stepper_id: int) -> None:
         """Disable a stepper motor."""
+        stepper_id = self._require_id("stepper_id", stepper_id, 1, 4)
         msg = StepEnable()
         msg.stepper_number = stepper_id
         msg.enable = False
@@ -577,6 +621,7 @@ class Robot:
         move_type: 0=absolute, 1=relative
         Returns True when motion completes, False on timeout.
         """
+        stepper_id = self._require_id("stepper_id", stepper_id, 1, 4)
         msg = StepMove()
         msg.stepper_number = stepper_id
         msg.move_type      = move_type
@@ -599,6 +644,7 @@ class Robot:
         Home a stepper motor against its limit switch.
         Returns True when complete, False on timeout.
         """
+        stepper_id = self._require_id("stepper_id", stepper_id, 1, 4)
         msg = StepHome()
         msg.stepper_number = stepper_id
         msg.direction      = direction
@@ -616,6 +662,7 @@ class Robot:
         acceleration: int,
     ) -> None:
         """Set speed and acceleration for a stepper motor."""
+        stepper_id = self._require_id("stepper_id", stepper_id, 1, 4)
         msg = StepConfigSet()
         msg.stepper_number = stepper_id
         msg.max_velocity   = int(max_velocity)
@@ -636,6 +683,7 @@ class Robot:
         Set a servo to angle_deg (0–180°).
         Maps 0° → 1000 µs, 180° → 2000 µs.
         """
+        channel = self._require_id("channel", channel, 1, 16)
         angle_clamped = max(0.0, min(180.0, angle_deg))
         pulse_us = int(self._SERVO_MIN_US + (angle_clamped / 180.0) * (self._SERVO_MAX_US - self._SERVO_MIN_US))
         msg = ServoSet()
@@ -645,18 +693,21 @@ class Robot:
 
     def set_servo_pulse(self, channel: int, pulse_us: int) -> None:
         """Set a servo directly by pulse width in microseconds."""
+        channel = self._require_id("channel", channel, 1, 16)
         msg = ServoSet()
         msg.channel  = channel
         msg.pulse_us = int(pulse_us)
         self._srv_set_pub.publish(msg)
 
     def enable_servo(self, channel: int) -> None:
+        channel = self._require_id("channel", channel, 1, 16)
         msg = ServoEnable()
         msg.channel = channel
         msg.enable  = True
         self._srv_en_pub.publish(msg)
 
     def disable_servo(self, channel: int) -> None:
+        channel = self._require_id("channel", channel, 1, 16)
         msg = ServoEnable()
         msg.channel = channel
         msg.enable  = False
@@ -676,14 +727,31 @@ class Robot:
         Non-blocking: current state of button button_id (1–16).
         Reads from the latest cached IOInputState message.
         """
+        button_id = self._require_id("button_id", button_id, 1, 16)
         with self._lock:
             return bool((self._buttons >> (button_id - 1)) & 1)
+
+    def was_button_pressed(self, button_id: int, consume: bool = True) -> bool:
+        """
+        Return True once per rising edge seen on button_id.
+
+        Edges are latched in the ROS subscription callback at firmware telemetry
+        rate, so short presses are not lost when the FSM loop runs slower.
+        """
+        button_id = self._require_id("button_id", button_id, 1, 16)
+        mask = 1 << (button_id - 1)
+        with self._lock:
+            pressed = bool(self._button_edges & mask)
+            if pressed and consume:
+                self._button_edges &= ~mask
+            return pressed
 
     def wait_for_button(self, button_id: int, timeout: float = None) -> bool:
         """
         Blocking: wait until button_id transitions from not-pressed to pressed.
         Returns True if pressed within timeout, False on timeout.
         """
+        button_id = self._require_id("button_id", button_id, 1, 16)
         with self._lock:
             if (self._buttons >> (button_id - 1)) & 1:
                 return True
@@ -697,11 +765,23 @@ class Robot:
 
     def get_limit(self, limit_id: int) -> bool:
         """Non-blocking: current state of limit switch limit_id (1–16)."""
+        limit_id = self._require_id("limit_id", limit_id, 1, 16)
         with self._lock:
             return bool((self._limits >> (limit_id - 1)) & 1)
 
+    def was_limit_triggered(self, limit_id: int, consume: bool = True) -> bool:
+        """Return True once per rising edge seen on limit_id."""
+        limit_id = self._require_id("limit_id", limit_id, 1, 16)
+        mask = 1 << (limit_id - 1)
+        with self._lock:
+            triggered = bool(self._limit_edges & mask)
+            if triggered and consume:
+                self._limit_edges &= ~mask
+            return triggered
+
     def wait_for_limit(self, limit_id: int, timeout: float = None) -> bool:
         """Blocking: wait until limit switch limit_id is triggered."""
+        limit_id = self._require_id("limit_id", limit_id, 1, 16)
         with self._lock:
             if (self._limits >> (limit_id - 1)) & 1:
                 return True
@@ -717,18 +797,20 @@ class Robot:
         self,
         led_id: int,
         brightness: int,
-        mode: int = 1,
+        mode: int | None = None,
         period_ms: int = 0,
         duty_cycle: int = 0,
     ) -> None:
         """
         Control an onboard LED.
-        mode: 1=steady, 2=blink, 3=fade (firmware-defined)
+        When mode is omitted, brightness 0 maps to OFF and non-zero brightness
+        maps to steady ON. Explicit modes follow the firmware contract:
+        0=off, 1=steady, 2=blink, 3=fade.
         """
         msg = IOSetLed()
         msg.led_id     = led_id
-        msg.mode       = mode
-        msg.brightness = brightness
+        msg.brightness = max(0, min(255, int(brightness)))
+        msg.mode       = (0 if msg.brightness == 0 else 1) if mode is None else int(mode)
         msg.period_ms  = period_ms
         msg.duty_cycle = duty_cycle
         self._led_pub.publish(msg)
@@ -782,7 +864,7 @@ class Robot:
         waypoints_mm: list[tuple[float, float]],
         max_vel_mm: float,
         tolerance_mm: float,
-        update_hz: float = 20.0,
+        update_hz: float = float(DEFAULT_NAV_HZ),
     ) -> None:
         """Navigation thread body: pure-pursuit to a list of waypoints (mm)."""
         from robot.path_planner import PurePursuitPlanner
@@ -814,7 +896,7 @@ class Robot:
         target_rad: float,
         tolerance_rad: float,
         max_angular_rad: float = 2.0,
-        update_hz: float = 20.0,
+        update_hz: float = float(DEFAULT_NAV_HZ),
     ) -> None:
         """Navigation thread body: rotate to target_rad in place."""
         dt = 1.0 / update_hz
@@ -882,11 +964,18 @@ class Robot:
         with self._lock:
             return self._pose
 
+    @staticmethod
+    def _require_id(name: str, value: int, low: int, high: int) -> int:
+        value = int(value)
+        if not low <= value <= high:
+            raise ValueError(f"{name} must be between {low} and {high}, got {value}")
+        return value
+
     def _send_body_velocity_mm(self, linear_mm_s: float, angular_rad_s: float) -> None:
         """Diff-drive mixing and publish. All values in mm/s and rad/s."""
         half_wb = self._wheel_base / 2.0
-        self._send_motor_velocity_mm(self.LEFT_MOTOR,  linear_mm_s - angular_rad_s * half_wb)
-        self._send_motor_velocity_mm(self.RIGHT_MOTOR, linear_mm_s + angular_rad_s * half_wb)
+        self._send_motor_velocity_mm(self._left_wheel_motor, linear_mm_s - angular_rad_s * half_wb)
+        self._send_motor_velocity_mm(self._right_wheel_motor, linear_mm_s + angular_rad_s * half_wb)
 
     def _send_motor_velocity_mm(self, motor_id: int, velocity_mm_s: float) -> None:
         msg = DCSetVelocity()

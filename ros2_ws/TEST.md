@@ -200,6 +200,21 @@ Test the example FSM (defined in `src/robot/robot/main.py`):
 - Press **button 1** on the robot → FSM transitions to `MOVING`, robot drives forward
 - Press **button 2** → FSM returns to `IDLE`, robot stops
 
+If the transition looks wrong, verify the traffic directly from Shell 2:
+
+```bash
+ros2 topic hz /io_input_state
+ros2 topic echo /io_input_state
+ros2 topic echo /io_set_led
+ros2 topic hz /io_output_state
+ros2 topic echo /io_output_state
+```
+
+Expected behavior:
+- `/io_input_state` should run at about `50 Hz` and `button_mask` bit 0 / bit 1 should change when buttons 1 / 2 are pressed.
+- `/io_set_led` should show one LED command per state transition, not a continuous stream every FSM tick.
+- `/io_output_state` should run at about `10 Hz` and reflect the latest LED brightness state after the transition.
+
 ---
 
 ## 8. Test the NUEVO UI

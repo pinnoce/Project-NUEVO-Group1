@@ -4,6 +4,7 @@ import time
 import threading
 from typing import Callable
 
+from robot.hardware_map import Button, DEFAULT_FSM_HZ
 from robot.robot import Robot
 
 
@@ -19,7 +20,7 @@ class RobotFSM:
                 self.add_transition("MOVING", "done", "IDLE",  action=self._finish)
 
             def update(self):
-                if self.get_state() == "IDLE" and self.robot.get_button(1):
+                if self.get_state() == "IDLE" and self.robot.get_button(Button.BTN_1):
                     self.trigger("start")
 
             def _begin(self):
@@ -29,7 +30,7 @@ class RobotFSM:
                 self.robot.stop()
 
         fsm = MyFSM(robot)
-        fsm.spin(hz=20)         # blocks; runs update() at 20 Hz
+        fsm.spin()              # blocks; runs update() at firmware-matched rate
     """
 
     def __init__(self, robot: Robot, initial_state: str = "IDLE") -> None:
@@ -92,15 +93,21 @@ class RobotFSM:
         with self._lock:
             return self._state
 
-    def spin(self, hz: float = 10) -> None:
+    def spin(self, hz: float = float(DEFAULT_FSM_HZ)) -> None:
         """
         Blocking main loop. Calls update() at the requested frequency.
         Run this in the main thread after setting up transitions.
         """
         period = 1.0 / hz
+        next_tick = time.monotonic()
         while True:
             self.update()
-            time.sleep(period)
+            next_tick += period
+            sleep_s = next_tick - time.monotonic()
+            if sleep_s > 0.0:
+                time.sleep(sleep_s)
+            else:
+                next_tick = time.monotonic()
 
     # =========================================================================
     # Hooks  (override in subclass)

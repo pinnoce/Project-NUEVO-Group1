@@ -109,8 +109,11 @@ class BridgeNode(Node):
         publisher.publish(converter(msg_dict["data"], stamp))
 
     def _send(self, cmd: str, data: dict) -> bool:
-        self._runtime.handle_command(cmd, data)
-        return True
+        ok = self._runtime.handle_command(cmd, data)
+        if not ok:
+            reason = getattr(self._runtime, "last_command_error", None) or "unknown bridge command error"
+            self.get_logger().error(f"Rejected outgoing command {cmd}: {reason}")
+        return ok
 
     def _on_sys_cmd(self, msg: SysCommand) -> None:
         self._send("sys_cmd", {"command": int(msg.command)})
