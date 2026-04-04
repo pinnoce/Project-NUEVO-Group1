@@ -37,6 +37,8 @@ from bridge_interfaces.msg import (
     StepStateAll,
     SysCommand,
     SysConfigSet,
+    SysOdomParamReq,
+    SysOdomParamRsp,
     SysOdomParamSet,
     SysOdomReset,
     SystemConfig,
@@ -65,6 +67,7 @@ class BridgeNode(Node):
             "sys_info_rsp": (self.create_publisher(SystemInfo, "/sys_info_rsp", qos), conv.to_system_info),
             "sys_config_rsp": (self.create_publisher(SystemConfig, "/sys_config_rsp", qos), conv.to_system_config),
             "sys_diag_rsp": (self.create_publisher(SystemDiag, "/sys_diag_rsp", qos), conv.to_system_diag),
+            "sys_odom_param_rsp": (self.create_publisher(SysOdomParamRsp, "/sys_odom_param_rsp", qos), conv.to_sys_odom_param_rsp),
             "dc_pid_rsp": (self.create_publisher(DCPid, "/dc_pid_rsp", qos), conv.to_dc_pid),
             "dc_state_all": (self.create_publisher(DCStateAll, "/dc_state_all", qos), conv.to_dc_state_all),
             "step_config_rsp": (self.create_publisher(StepConfig, "/step_config_rsp", qos), conv.to_step_config),
@@ -79,6 +82,7 @@ class BridgeNode(Node):
 
         self.create_subscription(SysCommand, "/sys_cmd", self._on_sys_cmd, qos)
         self.create_subscription(SysConfigSet, "/sys_config_set", self._on_sys_config_set, qos)
+        self.create_subscription(SysOdomParamReq, "/sys_odom_param_req", self._on_sys_odom_param_req, qos)
         self.create_subscription(SysOdomParamSet, "/sys_odom_param_set", self._on_sys_odom_param_set, qos)
         self.create_subscription(SysOdomReset, "/sys_odom_reset", self._on_sys_odom_reset, qos)
         self.create_subscription(DCEnable, "/dc_enable", self._on_dc_enable, qos)
@@ -147,6 +151,9 @@ class BridgeNode(Node):
 
     def _on_sys_odom_reset(self, msg: SysOdomReset) -> None:
         self._send("sys_odom_reset", {"flags": int(msg.flags)})
+
+    def _on_sys_odom_param_req(self, msg: SysOdomParamReq) -> None:
+        self._send("sys_odom_param_req", {"target": int(msg.target)})
 
     def _on_sys_odom_param_set(self, msg: SysOdomParamSet) -> None:
         self._send("sys_odom_param_set", {

@@ -1,7 +1,7 @@
 import unittest
 
 from nuevo_bridge.runtime import BridgeRuntime
-from nuevo_bridge.TLV_TypeDefs import SYS_ODOM_PARAM_SET
+from nuevo_bridge.TLV_TypeDefs import SYS_ODOM_PARAM_REQ, SYS_ODOM_PARAM_SET
 from nuevo_bridge.webapp import create_app
 
 
@@ -98,6 +98,19 @@ class BridgeRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload.wheelDiameterMm, 80.0)
             self.assertEqual(payload.wheelBaseMm, 300.0)
             self.assertEqual(payload.initialThetaDeg, 45.0)
+        finally:
+            await runtime.stop()
+
+    async def test_odom_param_req_reaches_wire(self):
+        runtime = BridgeRuntime(serial_manager_factory=_FakeSerialManager)
+
+        await runtime.start()
+        try:
+            ok = runtime.handle_command("sys_odom_param_req", {"target": 0xFF})
+            self.assertTrue(ok)
+            tlv_type, payload = runtime.serial_manager.sent[-1]
+            self.assertEqual(tlv_type, SYS_ODOM_PARAM_REQ)
+            self.assertEqual(payload.target, 0xFF)
         finally:
             await runtime.stop()
 

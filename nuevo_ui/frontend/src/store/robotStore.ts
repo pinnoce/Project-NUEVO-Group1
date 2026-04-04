@@ -14,6 +14,7 @@ import type {
   IOStatusData,
   KinematicsData,
   MagCalStatusData,
+  OdomParamData,
   SensorRangeData,
   SensorUltrasonicAllData,
   ServoStatusAllData,
@@ -23,6 +24,7 @@ import type {
   SysConfigRspData,
   SysDiagRspData,
   SysInfoRspData,
+  SysOdomParamRspData,
   SysPowerData,
   SysStateData,
   SystemStatusData,
@@ -228,6 +230,7 @@ function clearedRobotState(connection: ConnectionData | null, serialConnected: b
     servo: null,
     io: null,
     kinematics: null,
+    odomParams: null,
     imu: null,
     magCal: null,
     rangeSensors: [],
@@ -236,6 +239,7 @@ function clearedRobotState(connection: ConnectionData | null, serialConnected: b
     sysConfigRaw: null,
     sysPowerRaw: null,
     sysDiagRaw: null,
+    sysOdomParamRaw: null,
     ioInputRaw: null,
     ioOutputRaw: null,
     dcPidCache: {},
@@ -254,6 +258,7 @@ interface RobotState {
   servo: ServoStatusAllData | null
   io: IOStatusData | null
   kinematics: KinematicsData | null
+  odomParams: OdomParamData | null
   imu: IMUData | null
   magCal: MagCalStatusData | null
   rangeSensors: SensorRangeData[]
@@ -264,6 +269,7 @@ interface RobotState {
   sysConfigRaw: SysConfigRspData | null
   sysPowerRaw: SysPowerData | null
   sysDiagRaw: SysDiagRspData | null
+  sysOdomParamRaw: SysOdomParamRspData | null
   ioInputRaw: IOInputStateData | null
   ioOutputRaw: IOOutputStateData | null
   dcPidCache: Record<string, DCPidRspData>
@@ -286,6 +292,7 @@ export const useRobotStore = create<RobotState>((set) => ({
   servo: null,
   io: null,
   kinematics: null,
+  odomParams: null,
   imu: null,
   magCal: null,
   rangeSensors: [],
@@ -296,6 +303,7 @@ export const useRobotStore = create<RobotState>((set) => ({
   sysConfigRaw: null,
   sysPowerRaw: null,
   sysDiagRaw: null,
+  sysOdomParamRaw: null,
   ioInputRaw: null,
   ioOutputRaw: null,
   dcPidCache: {},
@@ -452,6 +460,13 @@ export const useRobotStore = create<RobotState>((set) => ({
               sysDiagRaw,
             ),
           }
+        })
+        break
+
+      case 'sys_odom_param_rsp':
+        set({
+          sysOdomParamRaw: data as SysOdomParamRspData,
+          odomParams: data as OdomParamData,
         })
         break
 

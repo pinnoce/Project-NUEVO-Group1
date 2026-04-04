@@ -83,6 +83,16 @@ export interface SysDiagRspData {
   txDroppedFrames: number
 }
 
+export interface SysOdomParamRspData {
+  wheelDiameterMm: number
+  wheelBaseMm: number
+  initialThetaDeg: number
+  leftMotorNumber: number
+  leftMotorDirInverted: boolean
+  rightMotorNumber: number
+  rightMotorDirInverted: boolean
+}
+
 export interface ConnectionData {
   serialConnected: boolean
   port: string
@@ -317,6 +327,7 @@ export interface SensorRangeData {
   timestamp: number
 }
 
+export type OdomParamData = SysOdomParamRspData
 export type IMUData = SensorIMUData
 export type KinematicsData = SensorKinematicsData
 export type MagCalStatusData = SensorMagCalStatusData

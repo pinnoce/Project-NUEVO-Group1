@@ -38,7 +38,7 @@ from .config import (
 from .payloads import (
     PayloadHeartbeat, PayloadSysCmd,
     PayloadSysState, PayloadSysInfoRsp, PayloadSysConfigRsp, PayloadSysConfigSet,
-    PayloadSysPower, PayloadSysDiagRsp, PayloadSysOdomReset, PayloadSysOdomParamSet,
+    PayloadSysPower, PayloadSysDiagRsp, PayloadSysOdomReset, PayloadSysOdomParamReq, PayloadSysOdomParamSet, PayloadSysOdomParamRsp,
     PayloadDCStateAll, PayloadDCPidReq, PayloadDCPidRsp, PayloadDCResetPosition, PayloadDCHome,
     PayloadStepStateAll, PayloadStepConfigReq, PayloadStepConfigRsp,
     PayloadServoStateAll, PayloadSensorIMU, PayloadSensorKinematics,
@@ -51,7 +51,7 @@ from .TLV_TypeDefs import (
     SYS_CONFIG_REQ, SYS_CONFIG_RSP, SYS_CONFIG_SET,
     SYS_POWER,
     SYS_DIAG_REQ, SYS_DIAG_RSP,
-    SYS_ODOM_RESET, SYS_ODOM_PARAM_SET,
+    SYS_ODOM_RESET, SYS_ODOM_PARAM_REQ, SYS_ODOM_PARAM_RSP, SYS_ODOM_PARAM_SET,
     DC_PID_REQ, DC_PID_RSP, DC_PID_SET,
     DC_ENABLE, DC_SET_VELOCITY, DC_SET_POSITION, DC_SET_PWM, DC_RESET_POSITION, DC_HOME,
     DC_STATE_ALL,
@@ -845,6 +845,9 @@ class MockSerialManager:
             a.reset_odometry_pose()
             print("[Mock] Odometry reset")
 
+        elif tlv_type == SYS_ODOM_PARAM_REQ:
+            self._gen_sys_odom_param_rsp()
+
         elif tlv_type == SYS_ODOM_PARAM_SET:
             if a.state == _SYS_IDLE and payload.leftMotorId != payload.rightMotorId and \
                0 <= payload.leftMotorId < 4 and 0 <= payload.rightMotorId < 4 and \
@@ -856,6 +859,7 @@ class MockSerialManager:
                 a.odom_right_motor_id = payload.rightMotorId
                 a.odom_left_motor_dir_inverted = bool(payload.leftMotorDirInverted)
                 a.odom_right_motor_dir_inverted = bool(payload.rightMotorDirInverted)
+                self._gen_sys_odom_param_rsp()
 
         elif tlv_type == DC_PID_REQ:
             self._gen_dc_pid_rsp(payload.motorId, payload.loopType)
@@ -1037,6 +1041,18 @@ class MockSerialManager:
         p.txPendingBytes = 0
         p.txDroppedFrames = 0
         self._emit(SYS_DIAG_RSP, p)
+
+    def _gen_sys_odom_param_rsp(self):
+        a = self.arduino
+        p = PayloadSysOdomParamRsp()
+        p.wheelDiameterMm = a.wheel_diameter_mm
+        p.wheelBaseMm = a.wheel_base_mm
+        p.initialThetaDeg = a.initial_theta_deg
+        p.leftMotorId = a.odom_left_motor_id
+        p.leftMotorDirInverted = 1 if a.odom_left_motor_dir_inverted else 0
+        p.rightMotorId = a.odom_right_motor_id
+        p.rightMotorDirInverted = 1 if a.odom_right_motor_dir_inverted else 0
+        self._emit(SYS_ODOM_PARAM_RSP, p)
 
     def _gen_dc_status_all(self):
         a = self.arduino

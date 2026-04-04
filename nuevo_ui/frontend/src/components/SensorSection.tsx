@@ -3,7 +3,7 @@ import { useRobotStore } from '../store/robotStore';
 import { Modal } from './common/Modal';
 import { wsSend } from '../lib/wsSend';
 import figure8Image from '../assets/arrow.svg';
-import type { IMUData, MagCalStatusData, SensorRangeData, KinematicsData } from '../lib/wsProtocol';
+import type { IMUData, MagCalStatusData, SensorRangeData, KinematicsData, OdomParamData } from '../lib/wsProtocol';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -690,7 +690,7 @@ function RangePlaceholderCard({ sensorType, sensorId }: { sensorType: number; se
 
 const MM_TO_IN = 1 / 25.4;
 
-function OdometryCard({ kinematics }: { kinematics: KinematicsData }) {
+function OdometryCard({ kinematics, odomParams }: { kinematics: KinematicsData; odomParams: OdomParamData | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const trailRef  = useRef<{ x: number; y: number }[]>([]);
   const [unit, setUnit] = useState<'mm' | 'in'>('mm');
@@ -862,6 +862,27 @@ function OdometryCard({ kinematics }: { kinematics: KinematicsData }) {
         <CompactRow label="θ"  value={`${thetaDeg.toFixed(1)}°`} />
         <CompactRow label="Vx" value={spdFmt(kinematics.vx)} />
         <CompactRow label="Vy" value={spdFmt(kinematics.vy)} />
+        {odomParams ? (
+          <>
+            <div className="my-2 h-px bg-white/10" />
+            <CompactRow label="Wheel Ø" value={distFmt(odomParams.wheelDiameterMm)} />
+            <CompactRow label="Wheel Base" value={distFmt(odomParams.wheelBaseMm)} />
+            <CompactRow label="Reset θ" value={`${odomParams.initialThetaDeg.toFixed(1)}°`} />
+            <CompactRow
+              label="Left Odom"
+              value={`M${odomParams.leftMotorNumber}${odomParams.leftMotorDirInverted ? ' (inv)' : ''}`}
+            />
+            <CompactRow
+              label="Right Odom"
+              value={`M${odomParams.rightMotorNumber}${odomParams.rightMotorDirInverted ? ' (inv)' : ''}`}
+            />
+          </>
+        ) : (
+          <>
+            <div className="my-2 h-px bg-white/10" />
+            <div className="text-xs text-white/40">Waiting for odometry parameters</div>
+          </>
+        )}
       </div>
 
       <button
@@ -917,6 +938,7 @@ export function SensorSection({ source }: SensorSectionProps) {
   const system       = useRobotStore((s) => s.system);
   const rangeSensors = useRobotStore((s) => s.rangeSensors);
   const kinematics   = useRobotStore((s) => s.kinematics);
+  const odomParams   = useRobotStore((s) => s.odomParams);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
   const [calibrationPhase, setCalibrationPhase] = useState<CalibrationPhase>('preparing');
   const [calibrationError, setCalibrationError] = useState<string | null>(null);
@@ -1033,7 +1055,7 @@ export function SensorSection({ source }: SensorSectionProps) {
           onCalibrate={beginCalibration}
         />
       )}
-      {hasOdometry && <OdometryCard kinematics={kinematics!} />}
+      {hasOdometry && kinematics && <OdometryCard kinematics={kinematics} odomParams={odomParams} />}
       {rangeSensors.map((sensor) => (
         <RangeCard key={sensor.sensorId} sensor={sensor} />
       ))}

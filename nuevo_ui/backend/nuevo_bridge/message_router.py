@@ -76,6 +76,7 @@ class MessageRouter:
         self._sys_info: Optional[dict] = None
         self._sys_config: Optional[dict] = None
         self._sys_diag: Optional[dict] = None
+        self._sys_odom_param: Optional[dict] = None
         self._io_input: Optional[dict] = None
         self._io_output: Optional[dict] = None
         self._dc_pid_cache: Dict[Tuple[int, int], dict] = {}
@@ -113,9 +114,10 @@ class MessageRouter:
         self._sys_info = None
         self._sys_config = None
         self._sys_diag = None
+        self._sys_odom_param = None
         self._dc_pid_cache.clear()
         self._step_config_cache.clear()
-        for topic in ("sys_info_rsp", "sys_config_rsp", "sys_diag_rsp"):
+        for topic in ("sys_info_rsp", "sys_config_rsp", "sys_diag_rsp", "sys_odom_param_rsp"):
             self._latest_ws_messages.pop(topic, None)
         for topic in list(self._latest_ws_messages.keys()):
             if topic == "dc_pid_rsp" or topic.startswith("dc_pid_rsp:") or \
@@ -157,6 +159,7 @@ class MessageRouter:
         self.send_wire_command("sys_info_req", {"target": 0xFF})
         self.send_wire_command("sys_config_req", {"target": 0xFF})
         self.send_wire_command("sys_diag_req", {"target": 0xFF})
+        self.send_wire_command("sys_odom_param_req", {"target": 0xFF})
         for motor_number in range(1, 5):
             self.send_wire_command("dc_pid_req", {"motorNumber": motor_number, "loopType": 0})
             self.send_wire_command("dc_pid_req", {"motorNumber": motor_number, "loopType": 1})
@@ -174,6 +177,7 @@ class MessageRouter:
             "sys_info_rsp",
             "sys_config_rsp",
             "sys_diag_rsp",
+            "sys_odom_param_rsp",
             "sys_power",
             "sys_state",
             "io_input_state",
@@ -201,6 +205,8 @@ class MessageRouter:
             self.send_wire_command("sys_info_req", {"target": 0xFF})
         if self._sys_config is None:
             self.send_wire_command("sys_config_req", {"target": 0xFF})
+        if self._sys_odom_param is None:
+            self.send_wire_command("sys_odom_param_req", {"target": 0xFF})
         self.send_wire_command("sys_diag_req", {"target": 0xFF})
 
     # ------------------------------------------------------------------
@@ -247,6 +253,21 @@ class MessageRouter:
             return None
         self._sys_diag = decoded
         return [self._wrap("sys_diag_rsp", decoded)]
+
+    def _decode_sys_odom_param_rsp(self, tlv_data: bytes) -> DecodedMessages:
+        decoded = _decode_fixed(PayloadSysOdomParamRsp, tlv_data)
+        if decoded is None:
+            return None
+        self._sys_odom_param = {
+            "wheelDiameterMm": float(decoded["wheelDiameterMm"]),
+            "wheelBaseMm": float(decoded["wheelBaseMm"]),
+            "initialThetaDeg": float(decoded["initialThetaDeg"]),
+            "leftMotorNumber": int(decoded["leftMotorId"]) + 1,
+            "leftMotorDirInverted": bool(decoded["leftMotorDirInverted"]),
+            "rightMotorNumber": int(decoded["rightMotorId"]) + 1,
+            "rightMotorDirInverted": bool(decoded["rightMotorDirInverted"]),
+        }
+        return [self._wrap("sys_odom_param_rsp", self._sys_odom_param)]
 
     def _decode_dc_state_all(self, tlv_data: bytes) -> DecodedMessages:
         if len(tlv_data) != ctypes.sizeof(PayloadDCStateAll):
@@ -421,6 +442,7 @@ class MessageRouter:
             SYS_CONFIG_RSP: self._decode_sys_config_rsp,
             SYS_POWER: self._decode_sys_power,
             SYS_DIAG_RSP: self._decode_sys_diag_rsp,
+            SYS_ODOM_PARAM_RSP: self._decode_sys_odom_param_rsp,
             DC_STATE_ALL: self._decode_dc_state_all,
             DC_PID_RSP: self._decode_dc_pid_rsp,
             STEP_STATE_ALL: self._decode_step_state_all,
@@ -485,6 +507,11 @@ class MessageRouter:
 
     def _encode_sys_diag_req(self, data: dict) -> Optional[ctypes.Structure]:
         payload = PayloadSysDiagReq()
+        payload.target = int(data.get("target", 0xFF))
+        return payload
+
+    def _encode_sys_odom_param_req(self, data: dict) -> Optional[ctypes.Structure]:
+        payload = PayloadSysOdomParamReq()
         payload.target = int(data.get("target", 0xFF))
         return payload
 
@@ -718,6 +745,7 @@ class MessageRouter:
             "sys_info_req": (SYS_INFO_REQ, self._encode_sys_info_req),
             "sys_config_req": (SYS_CONFIG_REQ, self._encode_sys_config_req),
             "sys_diag_req": (SYS_DIAG_REQ, self._encode_sys_diag_req),
+            "sys_odom_param_req": (SYS_ODOM_PARAM_REQ, self._encode_sys_odom_param_req),
             "sys_config_set": (SYS_CONFIG_SET, self._encode_sys_config_set),
             "sys_odom_reset": (SYS_ODOM_RESET, self._encode_sys_odom_reset),
             "sys_odom_param_set": (SYS_ODOM_PARAM_SET, self._encode_sys_odom_param_set),

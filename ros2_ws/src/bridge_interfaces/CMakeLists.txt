@@ -12,6 +12,8 @@ set(msg_files
   "msg/SystemInfo.msg"
   "msg/SystemConfig.msg"
   "msg/SystemDiag.msg"
+  "msg/SysOdomParamReq.msg"
+  "msg/SysOdomParamRsp.msg"
   "msg/DCPid.msg"
   "msg/DCMotorState.msg"
   "msg/DCStateAll.msg"

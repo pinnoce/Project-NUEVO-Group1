@@ -19,6 +19,7 @@ from bridge_interfaces.msg import (
     StepConfig,
     StepStateAll,
     StepperState,
+    SysOdomParamRsp,
     SystemConfig,
     SystemDiag,
     SystemInfo,
@@ -104,6 +105,19 @@ def to_system_diag(data: dict, stamp: Time) -> SystemDiag:
     msg.oversize_errors = int(data["oversizeErrors"])
     msg.tx_pending_bytes = int(data["txPendingBytes"])
     msg.tx_dropped_frames = int(data["txDroppedFrames"])
+    return msg
+
+
+def to_sys_odom_param_rsp(data: dict, stamp: Time) -> SysOdomParamRsp:
+    msg = SysOdomParamRsp()
+    msg.header = _header(stamp)
+    msg.wheel_diameter_mm = float(data["wheelDiameterMm"])
+    msg.wheel_base_mm = float(data["wheelBaseMm"])
+    msg.initial_theta_deg = float(data["initialThetaDeg"])
+    msg.left_motor_number = int(data["leftMotorNumber"])
+    msg.left_motor_dir_inverted = bool(data["leftMotorDirInverted"])
+    msg.right_motor_number = int(data["rightMotorNumber"])
+    msg.right_motor_dir_inverted = bool(data["rightMotorDirInverted"])
     return msg
 
 

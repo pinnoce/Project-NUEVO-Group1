@@ -29,6 +29,8 @@ from bridge_interfaces.msg import (
     StepHome,
     StepMove,
     StepStateAll,
+    SysOdomParamReq,
+    SysOdomParamRsp,
     SysOdomParamSet,
     SysOdomReset,
     SystemPower,
@@ -203,6 +205,7 @@ class Robot:
         self._srv_set_pub  = node.create_publisher(ServoSet,       '/servo_set',        10)
         self._led_pub      = node.create_publisher(IOSetLed,       '/io_set_led',       10)
         self._neo_pub      = node.create_publisher(IOSetNeopixel,  '/io_set_neopixel',  10)
+        self._odom_param_req_pub = node.create_publisher(SysOdomParamReq, '/sys_odom_param_req', 10)
         self._odom_param_pub = node.create_publisher(SysOdomParamSet, '/sys_odom_param_set', 10)
         self._odom_pub     = node.create_publisher(SysOdomReset,   '/sys_odom_reset',   10)
 
@@ -215,9 +218,13 @@ class Robot:
         node.create_subscription(SensorImu,        '/sensor_imu',        self._on_imu,         10)
         node.create_subscription(SensorKinematics, '/sensor_kinematics', self._on_kinematics,  10)
         node.create_subscription(IOInputState,     '/io_input_state',    self._on_io_input,    10)
+        node.create_subscription(SysOdomParamRsp,  '/sys_odom_param_rsp', self._on_odom_param_rsp, 10)
 
         # ── Service clients ───────────────────────────────────────────────────
         self._set_state_client = node.create_client(SetFirmwareState, '/set_firmware_state')
+
+        # Sync the local diff-drive / odometry cache with the live firmware snapshot.
+        self.request_odometry_parameters()
 
     # =========================================================================
     # Subscription callbacks  (ROS spin thread)
@@ -275,6 +282,17 @@ class Robot:
                 ev = self._limit_events.get(bid)
                 if ev:
                     ev.set()
+
+    def _on_odom_param_rsp(self, msg: SysOdomParamRsp) -> None:
+        self._apply_odom_param_snapshot(
+            float(msg.wheel_diameter_mm),
+            float(msg.wheel_base_mm),
+            float(msg.initial_theta_deg),
+            int(msg.left_motor_number),
+            bool(msg.left_motor_dir_inverted),
+            int(msg.right_motor_number),
+            bool(msg.right_motor_dir_inverted),
+        )
 
     # =========================================================================
     # System
@@ -383,6 +401,25 @@ class Robot:
             right_wheel_motor=right_motor_id,
             right_wheel_dir_inverted=right_motor_dir_inverted,
         )
+
+    def request_odometry_parameters(self) -> None:
+        """Request the current firmware odometry parameter snapshot."""
+        msg = SysOdomParamReq()
+        msg.target = 0xFF
+        self._odom_param_req_pub.publish(msg)
+
+    def get_odometry_parameters(self) -> dict[str, float | int | bool]:
+        """Return the latest local odometry parameter snapshot."""
+        with self._lock:
+            return {
+                "wheel_diameter_mm": self._wheel_diameter,
+                "wheel_base_mm": self._wheel_base,
+                "initial_theta_deg": self._initial_theta_deg,
+                "left_motor_number": self._left_wheel_motor,
+                "left_motor_dir_inverted": self._left_wheel_dir_inverted,
+                "right_motor_number": self._right_wheel_motor,
+                "right_motor_dir_inverted": self._right_wheel_dir_inverted,
+            }
 
     def get_power(self) -> SystemPower:
         """Return cached power state (battery_mv, rail_5v_mv, servo_rail_mv)."""
@@ -1120,6 +1157,28 @@ class Robot:
             raise ValueError(f"{name} must be finite, got {value}")
         return value
 
+    def _apply_odom_param_snapshot(
+        self,
+        wheel_diameter_mm: float,
+        wheel_base_mm: float,
+        initial_theta_deg: float,
+        left_motor_number: int,
+        left_motor_dir_inverted: bool,
+        right_motor_number: int,
+        right_motor_dir_inverted: bool,
+    ) -> None:
+        with self._lock:
+            self._wheel_diameter = self._require_positive_float("wheel_diameter_mm", wheel_diameter_mm)
+            self._wheel_base = self._require_positive_float("wheel_base_mm", wheel_base_mm)
+            self._initial_theta_deg = self._require_finite_float("initial_theta_deg", initial_theta_deg)
+            self._left_wheel_motor = self._require_id("left_motor_number", left_motor_number, 1, 4)
+            self._right_wheel_motor = self._require_id("right_motor_number", right_motor_number, 1, 4)
+            if self._left_wheel_motor == self._right_wheel_motor:
+                raise ValueError("left and right odometry motors must be different")
+            self._left_wheel_dir_inverted = bool(left_motor_dir_inverted)
+            self._right_wheel_dir_inverted = bool(right_motor_dir_inverted)
+            self._ticks_per_mm = self._encoder_ppr / (math.pi * self._wheel_diameter)
+
     def _update_odometry_params(
         self,
         *,
@@ -1145,26 +1204,30 @@ class Robot:
             if next_left_motor == next_right_motor:
                 raise ValueError("left and right odometry motors must be different")
 
-            self._wheel_diameter = next_wheel_diameter
-            self._wheel_base = next_wheel_base
-            self._initial_theta_deg = next_initial_theta
-            self._left_wheel_motor = next_left_motor
-            self._right_wheel_motor = next_right_motor
-            if left_wheel_dir_inverted is not None:
-                self._left_wheel_dir_inverted = bool(left_wheel_dir_inverted)
-            if right_wheel_dir_inverted is not None:
-                self._right_wheel_dir_inverted = bool(right_wheel_dir_inverted)
-            self._ticks_per_mm = self._encoder_ppr / (math.pi * self._wheel_diameter)
+            next_left_inverted = self._left_wheel_dir_inverted if left_wheel_dir_inverted is None else \
+                bool(left_wheel_dir_inverted)
+            next_right_inverted = self._right_wheel_dir_inverted if right_wheel_dir_inverted is None else \
+                bool(right_wheel_dir_inverted)
 
-            snapshot = (
-                self._wheel_diameter,
-                self._wheel_base,
-                self._initial_theta_deg,
-                self._left_wheel_motor,
-                self._left_wheel_dir_inverted,
-                self._right_wheel_motor,
-                self._right_wheel_dir_inverted,
-            )
+        self._apply_odom_param_snapshot(
+            next_wheel_diameter,
+            next_wheel_base,
+            next_initial_theta,
+            next_left_motor,
+            next_left_inverted,
+            next_right_motor,
+            next_right_inverted,
+        )
+
+        snapshot = (
+            next_wheel_diameter,
+            next_wheel_base,
+            next_initial_theta,
+            next_left_motor,
+            next_left_inverted,
+            next_right_motor,
+            next_right_inverted,
+        )
 
         self._publish_odom_params(snapshot)
 

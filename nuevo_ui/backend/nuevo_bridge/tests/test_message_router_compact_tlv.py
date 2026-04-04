@@ -1,8 +1,8 @@
 import ctypes
 
-from nuevo_bridge.TLV_TypeDefs import DC_ENABLE, DC_HOME, DC_RESET_POSITION, SENSOR_MAG_CAL_CMD, SERVO_STATE_ALL, SYS_DIAG_RSP, SYS_INFO_RSP, SYS_POWER, SYS_STATE
+from nuevo_bridge.TLV_TypeDefs import DC_ENABLE, DC_HOME, DC_RESET_POSITION, SENSOR_MAG_CAL_CMD, SERVO_STATE_ALL, SYS_DIAG_RSP, SYS_INFO_RSP, SYS_ODOM_PARAM_RSP, SYS_POWER, SYS_STATE
 from nuevo_bridge.message_router import MessageRouter
-from nuevo_bridge.payloads import PayloadDCEnable, PayloadDCHome, PayloadDCResetPosition, PayloadMagCalCmd, PayloadServoStateAll, PayloadSysDiagRsp, PayloadSysInfoRsp, PayloadSysPower, PayloadSysState
+from nuevo_bridge.payloads import PayloadDCEnable, PayloadDCHome, PayloadDCResetPosition, PayloadMagCalCmd, PayloadServoStateAll, PayloadSysDiagRsp, PayloadSysInfoRsp, PayloadSysOdomParamRsp, PayloadSysPower, PayloadSysState
 from tlvcodec import DecodeErrorCode, Decoder, Encoder
 
 
@@ -102,6 +102,17 @@ def main() -> None:
     decoded = router.decode_incoming(SYS_DIAG_RSP, bytes(diag))
     assert decoded is not None
 
+    odom = PayloadSysOdomParamRsp()
+    odom.wheelDiameterMm = 80.0
+    odom.wheelBaseMm = 300.0
+    odom.initialThetaDeg = 45.0
+    odom.leftMotorId = 1
+    odom.leftMotorDirInverted = 1
+    odom.rightMotorId = 3
+    odom.rightMotorDirInverted = 0
+    decoded = router.decode_incoming(SYS_ODOM_PARAM_RSP, bytes(odom))
+    assert decoded is not None
+
     servo = PayloadServoStateAll()
     servo.pca9685Connected = 1
     servo.pca9685Error = 0
@@ -124,8 +135,10 @@ def main() -> None:
     topics = [message["topic"] for message in cached]
     assert "sys_info_rsp" in topics
     assert "sys_diag_rsp" in topics
+    assert "sys_odom_param_rsp" in topics
     assert "servo_state_all" in topics
     assert router._latest_ws_messages["sys_diag_rsp"]["data"]["uartRxErrors"] == 7
+    assert router._latest_ws_messages["sys_odom_param_rsp"]["data"]["leftMotorNumber"] == 2
 
     print("PASS: message router compact tlv")
 

@@ -160,7 +160,28 @@ class PayloadSysOdomReset(ctypes.Structure):
     ]
 
 
+class PayloadSysOdomParamReq(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("target", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8 * 3),
+    ]
+
+
 class PayloadSysOdomParamSet(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("wheelDiameterMm", ctypes.c_float),
+        ("wheelBaseMm", ctypes.c_float),
+        ("initialThetaDeg", ctypes.c_float),
+        ("leftMotorId", ctypes.c_uint8),
+        ("leftMotorDirInverted", ctypes.c_uint8),
+        ("rightMotorId", ctypes.c_uint8),
+        ("rightMotorDirInverted", ctypes.c_uint8),
+    ]
+
+
+class PayloadSysOdomParamRsp(ctypes.Structure):
     _pack_ = 1
     _fields_ = [
         ("wheelDiameterMm", ctypes.c_float),
@@ -560,7 +581,9 @@ def verify_payload_sizes() -> None:
         PayloadSysDiagReq: 4,
         PayloadSysDiagRsp: 24,
         PayloadSysOdomReset: 4,
+        PayloadSysOdomParamReq: 4,
         PayloadSysOdomParamSet: 16,
+        PayloadSysOdomParamRsp: 16,
         PayloadDCEnable: 4,
         PayloadDCSetPosition: 12,
         PayloadDCSetVelocity: 8,

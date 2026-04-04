@@ -103,6 +103,8 @@ def _install_fake_robot_dependencies() -> None:
         "StepHome",
         "StepMove",
         "StepStateAll",
+        "SysOdomParamReq",
+        "SysOdomParamRsp",
         "SysOdomParamSet",
         "SysOdomReset",
         "SystemPower",
@@ -207,6 +209,38 @@ class RobotApiTests(unittest.TestCase):
         self.assertFalse(msg.left_motor_dir_inverted)
         self.assertEqual(msg.right_motor_number, 2)
         self.assertTrue(msg.right_motor_dir_inverted)
+
+    def test_request_odometry_parameters_publishes_query(self) -> None:
+        self.robot.request_odometry_parameters()
+
+        msg = self.node.publishers["/sys_odom_param_req"].published[-1]
+        self.assertEqual(msg.target, 0xFF)
+
+    def test_odom_param_response_updates_local_snapshot(self) -> None:
+        msg = types.SimpleNamespace(
+            wheel_diameter_mm=82.5,
+            wheel_base_mm=345.0,
+            initial_theta_deg=45.0,
+            left_motor_number=3,
+            left_motor_dir_inverted=True,
+            right_motor_number=4,
+            right_motor_dir_inverted=False,
+        )
+
+        self.robot._on_odom_param_rsp(msg)
+
+        self.assertEqual(
+            self.robot.get_odometry_parameters(),
+            {
+                "wheel_diameter_mm": 82.5,
+                "wheel_base_mm": 345.0,
+                "initial_theta_deg": 45.0,
+                "left_motor_number": 3,
+                "left_motor_dir_inverted": True,
+                "right_motor_number": 4,
+                "right_motor_dir_inverted": False,
+            },
+        )
 
     def test_duplicate_odom_motor_pair_fails_fast(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be different"):

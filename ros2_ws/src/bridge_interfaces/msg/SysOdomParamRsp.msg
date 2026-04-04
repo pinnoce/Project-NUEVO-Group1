@@ -1,0 +1,8 @@
+std_msgs/Header header
+float32 wheel_diameter_mm
+float32 wheel_base_mm
+float32 initial_theta_deg
+uint8 left_motor_number
+bool left_motor_dir_inverted
+uint8 right_motor_number
+bool right_motor_dir_inverted
