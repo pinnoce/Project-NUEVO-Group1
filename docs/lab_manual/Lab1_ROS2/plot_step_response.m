@@ -18,6 +18,8 @@ clear; clc; close all;
 CSV_FILE = 'dc_motor_1_0331_15-28.csv';
 SETPOINT = 1000;    % velocity setpoint (ticks/s)
 BAND_PCT = 5;       % settling band width (%)
+PLOT_TIME = 2.0;    % seconds
+FONT_SIZE = 15;     % common plot font size
 
 %% ── Colour palette (material-design inspired) ────────────────────────────
 C_VEL      = [0.102 0.463 0.824];   % blue  700   — velocity trace
@@ -37,11 +39,19 @@ pwm_raw  = raw(:, 6);
 
 %% ── Isolate step region ──────────────────────────────────────────────────
 step_idx = find(pwm_raw ~= 0, 1, 'first');
+
 if isempty(step_idx)
     error('No non-zero PWM found — check the CSV file.');
 end
-t   = time_raw(step_idx:end) - time_raw(step_idx);
-vel = vel_raw(step_idx:end);
+
+step_start_time = time_raw(step_idx);
+step_end_idx = find(time_raw >= step_start_time + PLOT_TIME, 1, 'first');
+if isempty(step_end_idx)
+    step_end_idx = length(time_raw);
+end
+
+t   = time_raw(step_idx:step_end_idx) - step_start_time;
+vel = vel_raw(step_idx:step_end_idx);
 
 %% ── Performance metrics ──────────────────────────────────────────────────
 band = BAND_PCT / 100 * SETPOINT;
@@ -66,7 +76,11 @@ t_peak = t(peak_idx);
 
 % Settling time: last sample outside the ±band
 out_idx = find(vel < SETPOINT - band | vel > SETPOINT + band);
-t_s     = t(out_idx(end));
+if isempty(out_idx)
+    t_s = 0;
+else
+    t_s = t(out_idx(end));
+end
 
 % Steady-state error
 e_ss = SETPOINT - v_ss;
@@ -81,7 +95,7 @@ fprintf('  SS error        e_ss = %.1f ticks/s\n', e_ss);
 
 %% ── Plot ─────────────────────────────────────────────────────────────────
 figure('Position', [100 100 980 540], 'Color', 'w');
-ax = axes('FontSize', 11, 'LineWidth', 0.8);
+ax = axes('FontSize', FONT_SIZE, 'LineWidth', 0.8);
 hold on;
 
 % ±5 % settling band
@@ -122,29 +136,29 @@ metrics = sprintf(['t_r  =  %.3f s   (10%% to 90%% of SP)\n' ...
                    'e_ss =  %.1f t/s'], ...
                    t_r, Mp, t_s, BAND_PCT, e_ss);
 
-text(0.985, 0.04, metrics, ...
+text(0.55, 0.05, metrics, ...
     'Units', 'normalized', ...
-    'HorizontalAlignment', 'right', ...
+    'HorizontalAlignment', 'left', ...
     'VerticalAlignment', 'bottom', ...
     'BackgroundColor', C_BOX_BG, ...
     'EdgeColor', C_BOX_EDGE, ...
     'FontName', 'Courier New', ...
-    'FontSize', 10, ...
-    'Margin', 7, ...
+    'FontSize', FONT_SIZE, ...
+    'Margin', 10, ...
     'LineWidth', 0.8);
 
 %% ── Axes formatting ──────────────────────────────────────────────────────
-xlabel('Time (s)',       'FontSize', 13);
-ylabel('Velocity (t/s)', 'FontSize', 13);
+xlabel('Time (s)',       'FontSize', 20);
+ylabel('Velocity (t/s)', 'FontSize', 20);
 title('DC Motor 1 — Velocity Step Response  (0 \rightarrow 1000 t/s)', ...
-      'FontSize', 14, 'Interpreter', 'tex');
+      'FontSize', 20, 'Interpreter', 'tex');
 
-leg = legend('Location', 'northeast', 'FontSize', 10, 'Box', 'on');
+leg = legend('Location', 'northeast', 'FontSize', FONT_SIZE, 'Box', 'on');
 leg.BoxFace.ColorType = 'truecoloralpha';
 leg.BoxFace.ColorData = uint8([248 248 250 230]');
 
 grid on;  box on;
-xlim([t(1) t(end)]);
+xlim([0 min(PLOT_TIME, t(end))]);
 ylim([-50  v_peak * 1.15]);
 ax.GridAlpha = 0.15;
 ax.GridColor = [0.3 0.3 0.3];

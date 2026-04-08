@@ -43,10 +43,11 @@ services:
       - ros2_install:/ros2_ws/install
 
     environment:
-      # ── REQUIRED: set this to your group number (0–101) before first run ──────
-      # Each team must use a unique value so ROS2 nodes do not bleed across RPis.
-      # See ros2_ws/docker/ROS_DOMAIN_ID.md for full instructions.
-      - ROS_DOMAIN_ID=999
+      # Restrict DDS discovery to loopback — prevents ROS2 nodes from bleeding
+      # across RPis on the same network. All nodes on this Pi stay local.
+      # To override for a specific node (e.g. a global position relay):
+      #   ROS_LOCALHOST_ONLY=0 ros2 run <package> <node>
+      - ROS_LOCALHOST_ONLY=1
       - NUEVO_BRIDGE_SOURCE=/workspace/nuevo_bridge_source
       - NUEVO_USERS_FILE=/data/users.json
       - NUEVO_SERIAL_PORT=/dev/ttyAMA0

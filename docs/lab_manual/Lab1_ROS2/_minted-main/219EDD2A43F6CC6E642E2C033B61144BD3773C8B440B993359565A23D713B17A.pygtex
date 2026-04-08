@@ -1,0 +1,6 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+sudo\PYG{+w}{ }apt\PYG{+w}{ }update
+sudo\PYG{+w}{ }apt\PYG{+w}{ }install\PYG{+w}{ }\PYGZhy{}y\PYG{+w}{ }nodejs\PYG{+w}{ }npm
+node\PYG{+w}{ }\PYGZhy{}v
+npm\PYG{+w}{ }\PYGZhy{}v
+\end{Verbatim}

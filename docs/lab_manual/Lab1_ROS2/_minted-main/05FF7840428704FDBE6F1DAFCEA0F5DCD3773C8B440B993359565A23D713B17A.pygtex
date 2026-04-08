@@ -1,0 +1,8 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+curl\PYG{+w}{ }\PYGZhy{}fsSL\PYG{+w}{ }https://get.docker.com\PYG{+w}{ }\PYGZhy{}o\PYG{+w}{ }get\PYGZhy{}docker.sh
+sudo\PYG{+w}{ }sh\PYG{+w}{ }get\PYGZhy{}docker.sh
+sudo\PYG{+w}{ }usermod\PYG{+w}{ }\PYGZhy{}aG\PYG{+w}{ }docker\PYG{+w}{ }\PYG{n+nv}{\PYGZdl{}USER}
+newgrp\PYG{+w}{ }docker
+docker\PYG{+w}{ }\PYGZhy{}\PYGZhy{}version
+docker\PYG{+w}{ }compose\PYG{+w}{ }version
+\end{Verbatim}

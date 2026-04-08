@@ -25,29 +25,6 @@
 #define BOARD_REVISION          0       // 0 = unspecified / unknown
 
 // ============================================================================
-// ROBOT GEOMETRY — edit these to match your robot
-// ============================================================================
-
-// Outer diameter of each drive wheel (mm)
-#define WHEEL_DIAMETER_MM   74.0f
-
-// Centre-to-centre track width between the two drive wheels (mm)
-#define WHEEL_BASE_MM       333.0f
-
-// Initial theta (degree)
-#define INITIAL_THETA       90.0f
-
-// DC motor index that drives the left drive wheel (0-based, 0–3)
-// Positive encoder ticks must mean "wheel moving forward".
-// If the count direction is wrong, set ENCODER_N_DIR_INVERTED in config.h.
-#define ODOM_LEFT_MOTOR     0
-#define ODOM_LEFT_MOTOR_DIR_INVERTED 0
-
-// DC motor index that drives the right drive wheel (0-based, 0–3)
-#define ODOM_RIGHT_MOTOR    1
-#define ODOM_RIGHT_MOTOR_DIR_INVERTED 1
-
-// ============================================================================
 // QUICK TUNE SETTINGS
 // ============================================================================
 //
@@ -139,6 +116,29 @@
 #define ENCODER_2_DIR_INVERTED  0       // 0=normal, 1=inverted
 #define ENCODER_3_DIR_INVERTED  1       // 0=normal, 1=inverted
 #define ENCODER_4_DIR_INVERTED  1       // 0=normal, 1=inverted
+
+// ============================================================================
+// ROBOT GEOMETRY — edit these to match your robot
+// ============================================================================
+
+// Outer diameter of each drive wheel (mm)
+#define WHEEL_DIAMETER_MM   74.0f
+
+// Centre-to-centre track width between the two drive wheels (mm)
+#define WHEEL_BASE_MM       333.0f
+
+// Initial theta (degree)
+#define INITIAL_THETA       90.0f
+
+// DC motor index that drives the left drive wheel (0-based, 0–3)
+// Positive encoder ticks must mean "wheel moving forward".
+// If the count direction is wrong, set ENCODER_N_DIR_INVERTED in config.h.
+#define ODOM_LEFT_MOTOR     0 // MOTOR_1
+#define ODOM_LEFT_MOTOR_DIR_INVERTED 0
+
+// DC motor index that drives the right drive wheel (0-based, 0–3)
+#define ODOM_RIGHT_MOTOR    1 // MOTOR_2
+#define ODOM_RIGHT_MOTOR_DIR_INVERTED 1
 
 // ============================================================================
 // TIMING CONFIGURATION

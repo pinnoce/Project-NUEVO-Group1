@@ -1,0 +1,6 @@
+\begin{Verbatim}[commandchars=\\\{\}]
+\PYG{n}{Ts}\PYG{+w}{ }\PYG{p}{=}\PYG{+w}{ }\PYG{l+m+mf}{0.005}\PYG{p}{;}\PYG{+w}{                         }\PYG{c}{\PYGZpc{} sample period (s)  \PYGZhy{}\PYGZhy{} 200 Hz}
+\PYG{n}{C\PYGZus{}s}\PYG{+w}{ }\PYG{p}{=}\PYG{+w}{ }\PYG{n}{pid}\PYG{p}{(}\PYG{n}{Kp}\PYG{p}{,}\PYG{+w}{ }\PYG{n}{Ki}\PYG{p}{);}\PYG{+w}{                  }\PYG{c}{\PYGZpc{} continuous\PYGZhy{}time PI}
+\PYG{n}{C\PYGZus{}z}\PYG{+w}{ }\PYG{p}{=}\PYG{+w}{ }\PYG{n}{c2d}\PYG{p}{(}\PYG{n}{C\PYGZus{}s}\PYG{p}{,}\PYG{+w}{ }\PYG{n}{Ts}\PYG{p}{,}\PYG{+w}{ }\PYG{l+s}{\PYGZsq{}tustin\PYGZsq{}}\PYG{p}{);}\PYG{+w}{       }\PYG{c}{\PYGZpc{} discretize via bilinear transform}
+\PYG{n+nb}{display}\PYG{p}{(}\PYG{n}{C\PYGZus{}z}\PYG{p}{)}\PYG{+w}{                        }\PYG{c}{\PYGZpc{} inspect the result}
+\end{Verbatim}
