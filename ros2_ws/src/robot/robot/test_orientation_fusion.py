@@ -37,7 +37,7 @@ from robot.hardware_map import DEFAULT_FSM_HZ
 CIRCLE_RADIUS_MM  = 300.0    # mm — tighter circles stress heading fusion more
 DRIVE_SPEED_MM_S  = 100.0    # mm/s forward speed
 NUM_LAPS          = 2        # number of full circles to complete
-FUSION_ALPHA      = 0.1     # complementary-filter magnetometer weight
+FUSION_ALPHA      = 1     # complementary-filter magnetometer weight
 
 # Derived motion command
 _CIRCLE_PERIOD_S  = 2.0 * math.pi * CIRCLE_RADIUS_MM / DRIVE_SPEED_MM_S
@@ -49,9 +49,9 @@ _ANGULAR_DEG_S    = math.degrees(DRIVE_SPEED_MM_S / CIRCLE_RADIUS_MM)  # CCW pos
 import os
 _HOST_HOME = "/host_home"
 _PLOT_PATH = (
-    os.path.join(_HOST_HOME, "fusion_test_result.png")
+    os.path.join(_HOST_HOME, "orientation_fusion_test_result.png")
     if os.path.isdir(_HOST_HOME)
-    else os.path.expanduser("~/fusion_test_result.png")
+    else os.path.expanduser("~/orientation_fusion_test_result.png")
 )
 
 

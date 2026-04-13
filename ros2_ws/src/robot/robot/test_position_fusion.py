@@ -35,15 +35,15 @@ from robot.hardware_map import DEFAULT_FSM_HZ
 
 # ── Tunable parameters ────────────────────────────────────────────────────────
 
-DRIVE_DISTANCE_MM = 500.0    # mm — straight-line travel distance
+DRIVE_DISTANCE_MM = 1000.0    # mm — straight-line travel distance
 DRIVE_SPEED_MM_S  = 100.0    # mm/s forward speed
-POS_FUSION_ALPHA  = 0.10     # GPS weight for complementary filter (0–1)
+POS_FUSION_ALPHA  = 1     # GPS weight for complementary filter (0–1)
 
 # GPS frame → arena frame offset (mm).
 # Set these to the measured offset once calibrated; leave at 0 to trigger the
 # "offset not configured" warning and test uncompensated behaviour.
-GPS_OFFSET_X_MM   = 0.0
-GPS_OFFSET_Y_MM   = 0.0
+GPS_OFFSET_X_MM   = 609.6
+GPS_OFFSET_Y_MM   = -304.8
 
 # ── Plot output path ──────────────────────────────────────────────────────────
 # /host_home is the host $HOME bind-mounted in docker-compose.rpi.yml.
