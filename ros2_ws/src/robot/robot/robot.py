@@ -353,6 +353,8 @@ class Robot:
         with self._lock:
             self._imu = msg
             if msg.mag_calibrated:
+                # TODO: use the gravity vector from the AMRS to allow mouting of the IMU in any orientation, not just flat with Z up or down.  This would also allow auto-detection of the Z-down configuration without needing a user-set flag.
+                
                 # Use the Madgwick AHRS quaternion (accel + gyro + mag, 9-axis).
                 # The firmware runs the Fusion library AHRS which integrates all
                 # three sensor axes and applies gyroscope bias correction; the
