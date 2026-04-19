@@ -2,8 +2,6 @@
 set -uo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${script_dir}/../.." && pwd)"
-compose_file="${repo_root}/ros2_ws/docker/docker-compose.rpi.yml"
 env_file="${NUEVO_CAMERA_ENV_FILE:-/etc/default/nuevo-pi-camera}"
 
 if [[ -r "$env_file" ]]; then
@@ -16,11 +14,11 @@ fi
 
 : "${NUEVO_CAMERA_DEVICE:=/dev/video10}"
 : "${NUEVO_CAMERA_CARD_LABEL:=NUEVO Pi Camera}"
+: "${NUEVO_CAMERA_DOCKER_IMAGE:=nuevo-ros2:latest}"
 
 out_dir="/tmp/nuevo_camera_check"
 host_img="${out_dir}/host_loopback.jpg"
 docker_img="${out_dir}/docker_loopback.jpg"
-docker_tmp="/tmp/nuevo_camera_check_docker.jpg"
 pass_count=0
 fail_count=0
 
@@ -138,33 +136,39 @@ if [[ -c "$NUEVO_CAMERA_DEVICE" ]]; then
 fi
 
 section "Docker device access"
+docker_camera_run() {
+    docker run \
+        --rm \
+        --entrypoint bash \
+        --device "${NUEVO_CAMERA_DEVICE}:${NUEVO_CAMERA_DEVICE}" \
+        --env NUEVO_CAMERA_DEVICE="$NUEVO_CAMERA_DEVICE" \
+        --volume "${out_dir}:/tmp/nuevo_camera_check_host" \
+        "$NUEVO_CAMERA_DOCKER_IMAGE" \
+        -lc "$1"
+}
+
 if command -v docker >/dev/null 2>&1; then
-    container_id="$(docker compose -f "$compose_file" ps -q ros2_runtime 2>/dev/null || true)"
-    if [[ -n "$container_id" ]]; then
-        pass "ros2_runtime container is running"
-        if docker compose -f "$compose_file" exec -T ros2_runtime test -c "$NUEVO_CAMERA_DEVICE" 2>/dev/null; then
-            pass "$NUEVO_CAMERA_DEVICE exists inside ros2_runtime"
+    if ! docker image inspect "$NUEVO_CAMERA_DOCKER_IMAGE" >/dev/null 2>&1; then
+        fail "Docker image '$NUEVO_CAMERA_DOCKER_IMAGE' is not built; run docker compose -f ros2_ws/docker/docker-compose.rpi.yml build"
+    elif [[ ! -c "$NUEVO_CAMERA_DEVICE" ]]; then
+        fail "cannot test Docker access because $NUEVO_CAMERA_DEVICE does not exist on the host"
+    else
+        if docker_camera_run 'test -c "$NUEVO_CAMERA_DEVICE"'; then
+            pass "$NUEVO_CAMERA_DEVICE exists inside a disposable camera test container"
         else
-            fail "$NUEVO_CAMERA_DEVICE is not visible inside ros2_runtime; check docker-compose.rpi.yml device mappings"
+            fail "$NUEVO_CAMERA_DEVICE is not visible inside a Docker test container"
         fi
 
-        if docker compose -f "$compose_file" exec -T ros2_runtime bash -lc \
-            "timeout 8 ffmpeg -nostdin -y -loglevel error -f v4l2 -input_format yuyv422 -i '$NUEVO_CAMERA_DEVICE' -vframes 1 '$docker_tmp'"; then
-            if docker cp "${container_id}:${docker_tmp}" "$docker_img" 2>/dev/null; then
-                size="$(stat -c%s "$docker_img" 2>/dev/null || echo 0)"
-                if [[ "$size" -gt 1000 ]]; then
-                    pass "Docker loopback frame captured: $docker_img (${size} bytes)"
-                else
-                    fail "Docker loopback capture was too small (${size} bytes)"
-                fi
+        if docker_camera_run 'timeout 8 ffmpeg -nostdin -y -loglevel error -f v4l2 -input_format yuyv422 -i "$NUEVO_CAMERA_DEVICE" -vframes 1 /tmp/nuevo_camera_check_host/docker_loopback.jpg'; then
+            size="$(stat -c%s "$docker_img" 2>/dev/null || echo 0)"
+            if [[ "$size" -gt 1000 ]]; then
+                pass "Docker loopback frame captured: $docker_img (${size} bytes)"
             else
-                fail "captured inside Docker but could not copy $docker_tmp to host"
+                fail "Docker loopback capture was too small (${size} bytes)"
             fi
         else
-            fail "could not capture a frame from $NUEVO_CAMERA_DEVICE inside Docker"
+            fail "could not capture a frame from $NUEVO_CAMERA_DEVICE inside a Docker test container"
         fi
-    else
-        fail "ros2_runtime container is not running; start it with docker compose -f ros2_ws/docker/docker-compose.rpi.yml up -d"
     fi
 else
     fail "docker command is not installed or not on PATH"
