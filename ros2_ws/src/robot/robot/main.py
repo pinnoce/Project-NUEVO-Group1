@@ -89,10 +89,10 @@ def run(robot: Robot) -> None:
             robot._nav_follow_pp_path(
                 lookahead_distance=100.0,
                 max_linear_speed=130.0,
-                max_angular_speed=2.0,
+                max_angular_speed=1.5,
                 goal_tolerance=20.0,
-                obstacles_range=400.0,
-                safe_dist=150.0,
+                obstacles_range=500.0,
+                safe_dist=200.0,
                 sharp_angle=math.pi/4,
                 alpha=0.3,
             )
