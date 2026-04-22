@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import time
 
 import cv2
 import ncnn
@@ -37,6 +38,8 @@ class LetterboxInfo:
     scale: float
     pad_x: int
     pad_y: int
+    input_width: int
+    input_height: int
     original_width: int
     original_height: int
 
@@ -55,12 +58,14 @@ class YoloNcnnDetector:
         iou_threshold: float,
         max_detections: int,
         class_filter: str,
+        ncnn_threads: int = 0,
     ) -> None:
         self.model_path = Path(model_path).expanduser()
         self.input_size = int(input_size)
         self.confidence_threshold = float(confidence_threshold)
         self.iou_threshold = float(iou_threshold)
         self.max_detections = int(max_detections)
+        self.ncnn_threads = int(ncnn_threads)
 
         metadata = _load_ultralytics_metadata(self.model_path / "metadata.yaml")
         self.names = metadata["names"]
@@ -76,31 +81,45 @@ class YoloNcnnDetector:
 
         self._net = ncnn.Net()
         self._net.opt.use_vulkan_compute = False
+        if self.ncnn_threads > 0:
+            ncnn.set_omp_dynamic(0)
+            ncnn.set_omp_num_threads(self.ncnn_threads)
+            self._net.opt.num_threads = self.ncnn_threads
         self._net.load_param(str(param_path))
         self._net.load_model(str(bin_path))
+        self.last_preprocess_ms = 0.0
+        self.last_inference_ms = 0.0
+        self.last_postprocess_ms = 0.0
 
     @property
     def class_count(self) -> int:
         return len(self.names)
 
     def predict(self, frame_bgr: np.ndarray) -> list[DetectionRecord]:
-        input_tensor, letterbox = _letterbox_bgr_to_chw_rgb_float(frame_bgr, self.input_size)
+        preprocess_start = time.monotonic()
+        input_tensor, letterbox = _letterbox_bgr_to_ncnn_mat(frame_bgr, self.input_size)
+        inference_start = time.monotonic()
 
         with self._net.create_extractor() as extractor:
-            extractor.input(self.input_name, ncnn.Mat(input_tensor).clone())
+            extractor.input(self.input_name, input_tensor)
             _, output = extractor.extract(self.output_name)
 
+        postprocess_start = time.monotonic()
         predictions = _normalize_output(np.array(output), class_count=self.class_count)
-        return _decode_predictions(
+        records = _decode_predictions(
             predictions=predictions,
             names=self.names,
             letterbox=letterbox,
-            input_size=self.input_size,
             confidence_threshold=self.confidence_threshold,
             iou_threshold=self.iou_threshold,
             max_detections=self.max_detections,
             class_filter_ids=self.class_filter_ids,
         )
+        done = time.monotonic()
+        self.last_preprocess_ms = (inference_start - preprocess_start) * 1000.0
+        self.last_inference_ms = (postprocess_start - inference_start) * 1000.0
+        self.last_postprocess_ms = (done - postprocess_start) * 1000.0
+        return records
 
 
 def default_model_path(
@@ -192,10 +211,10 @@ def _resolve_class_filter(names: dict[int, str], raw_filter: str) -> set[int] | 
     return class_ids
 
 
-def _letterbox_bgr_to_chw_rgb_float(
+def _letterbox_bgr_to_ncnn_mat(
     frame_bgr: np.ndarray,
     input_size: int,
-) -> tuple[np.ndarray, LetterboxInfo]:
+) -> tuple[ncnn.Mat, LetterboxInfo]:
     original_height, original_width = frame_bgr.shape[:2]
     scale = min(input_size / float(original_width), input_size / float(original_height))
     resized_width = max(1, int(round(original_width * scale)))
@@ -207,14 +226,24 @@ def _letterbox_bgr_to_chw_rgb_float(
     canvas = np.full((input_size, input_size, 3), 114, dtype=np.uint8)
     canvas[pad_y : pad_y + resized_height, pad_x : pad_x + resized_width] = resized
 
-    rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-    chw = rgb.transpose(2, 0, 1).astype(np.float32) / 255.0
+    input_mat = ncnn.Mat.from_pixels(
+        np.ascontiguousarray(canvas),
+        ncnn.Mat.PixelType.PIXEL_BGR2RGB,
+        input_size,
+        input_size,
+    )
+    input_mat.substract_mean_normalize(
+        [0.0, 0.0, 0.0],
+        [1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0],
+    )
     return (
-        np.ascontiguousarray(chw),
+        input_mat,
         LetterboxInfo(
             scale=scale,
             pad_x=pad_x,
             pad_y=pad_y,
+            input_width=input_size,
+            input_height=input_size,
             original_width=original_width,
             original_height=original_height,
         ),
@@ -245,7 +274,6 @@ def _decode_predictions(
     predictions: np.ndarray,
     names: dict[int, str],
     letterbox: LetterboxInfo,
-    input_size: int,
     confidence_threshold: float,
     iou_threshold: float,
     max_detections: int,
@@ -266,7 +294,8 @@ def _decode_predictions(
         boxes_xyxy = _xywh_to_xyxy(boxes_xywh)
 
     if boxes_xyxy.size and float(np.nanmax(boxes_xyxy)) <= 2.0:
-        boxes_xyxy = boxes_xyxy * float(input_size)
+        boxes_xyxy[:, [0, 2]] = boxes_xyxy[:, [0, 2]] * float(letterbox.input_width)
+        boxes_xyxy[:, [1, 3]] = boxes_xyxy[:, [1, 3]] * float(letterbox.input_height)
 
     valid = confidences >= confidence_threshold
     if class_filter_ids is not None:

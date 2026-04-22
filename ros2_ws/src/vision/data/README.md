@@ -20,6 +20,9 @@ Default detection classes:
 - `stop sign`
 - `person`
 
+Default runtime settings use `model_imgsz:=640`, `confidence_threshold:=0.25`,
+`process_rate_hz:=5.0`, and `ncnn_threads:=4`.
+
 To try another Ultralytics model, export it to NCNN outside the ROS runtime,
 place the exported model folder under this directory, and launch the node with:
 
@@ -33,6 +36,12 @@ For all COCO classes, pass an empty class filter:
 
 ```bash
 ros2 run vision vision_node --ros-args -p class_filter:=""
+```
+
+To check live output:
+
+```bash
+ros2 topic echo /vision/detections
 ```
 
 Ignored local model files remain useful for experiments:

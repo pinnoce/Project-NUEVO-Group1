@@ -20,8 +20,9 @@ Default runtime parameters:
 - `model_path`: exported NCNN model directory
 - `model_imgsz`: `640`
 - `class_filter`: `traffic light,stop sign,person`
-- `confidence_threshold`: `0.35`
+- `confidence_threshold`: `0.25`
 - `process_rate_hz`: `5.0`
+- `ncnn_threads`: `4`
 - `camera_device`: `/dev/video10`
 - `camera_width`: `640`
 - `camera_height`: `480`
@@ -30,6 +31,12 @@ Set `class_filter` to an empty string to publish all model classes:
 
 ```bash
 ros2 run vision vision_node --ros-args -p class_filter:=""
+```
+
+Echo the detection topic from another shell inside the ROS container:
+
+```bash
+ros2 topic echo /vision/detections
 ```
 
 ## Message Contract

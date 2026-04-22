@@ -34,10 +34,11 @@ class VisionNode(Node):
         self.declare_parameter("process_rate_hz", 5.0)
         self.declare_parameter("model_path", str(model_default))
         self.declare_parameter("model_imgsz", 640)
-        self.declare_parameter("confidence_threshold", 0.35)
+        self.declare_parameter("confidence_threshold", 0.25)
         self.declare_parameter("iou_threshold", 0.7)
         self.declare_parameter("max_detections", 20)
         self.declare_parameter("class_filter", "traffic light,stop sign,person")
+        self.declare_parameter("ncnn_threads", 4)
         self.declare_parameter("reconnect_delay_sec", 1.0)
         self.declare_parameter("log_interval_sec", 5.0)
 
@@ -51,6 +52,7 @@ class VisionNode(Node):
         self._iou_threshold = float(self.get_parameter("iou_threshold").value)
         self._max_detections = int(self.get_parameter("max_detections").value)
         self._class_filter = str(self.get_parameter("class_filter").value)
+        self._ncnn_threads = int(self.get_parameter("ncnn_threads").value)
         self._reconnect_delay_sec = max(0.1, float(self.get_parameter("reconnect_delay_sec").value))
         self._log_interval_sec = max(1.0, float(self.get_parameter("log_interval_sec").value))
 
@@ -78,15 +80,18 @@ class VisionNode(Node):
             iou_threshold=self._iou_threshold,
             max_detections=self._max_detections,
             class_filter=self._class_filter,
+            ncnn_threads=self._ncnn_threads,
         )
 
         self.get_logger().info(
-            "Loaded NCNN YOLO model path=%s imgsz=%d classes=%d filter=%s"
+            "Loaded NCNN YOLO model path=%s max_imgsz=%d classes=%d filter=%s ncnn_threads=%s confidence=%.2f"
             % (
                 model_path,
                 self._model_imgsz,
                 self._detector.class_count,
                 self._class_filter or "all",
+                self._ncnn_threads if self._ncnn_threads > 0 else "auto",
+                self._confidence_threshold,
             )
         )
 
@@ -184,11 +189,14 @@ class VisionNode(Node):
             if now - self._last_loop_summary >= self._log_interval_sec:
                 self._last_loop_summary = now
                 self.get_logger().info(
-                    "Vision frame %dx%d inference=%.1fms detections=%d target_rate=%.1fHz"
+                    "Vision frame %dx%d total=%.1fms preprocess=%.1fms ncnn=%.1fms postprocess=%.1fms detections=%d target_rate=%.1fHz"
                     % (
                         frame.shape[1],
                         frame.shape[0],
                         inference_ms,
+                        self._detector.last_preprocess_ms,
+                        self._detector.last_inference_ms,
+                        self._detector.last_postprocess_ms,
                         detection_count,
                         self._process_rate_hz,
                     )
