@@ -79,23 +79,24 @@ def run(robot: Robot) -> None:
                 (1300.0, 2500.0),
             ]
 
-            path = densify_polyline(path_control_points, spacing=300.0)
+            path = densify_polyline(path_control_points, spacing=400.0)
 
-            robot._nav_follow_pp_path_lane(
+            robot._nav_follow_pp_path(
                 lookahead_distance=100.0,
-                max_linear_speed=130.0,
+                max_linear_speed=140.0,
                 max_angular_speed=1.5,
                 goal_tolerance=20.0,
                 obstacles_range=450.0,
                 view_angle=math.radians(70.0),
-                safe_dist=240.0,
+                safe_dist=250.0,
                 avoidance_delay=150,
-                alpha_Ld=0.8,
+                alpha_Ld=0.7,
                 offset=270.0,
+                lane_width=500.0,
                 obstacle_avoidance=True,
-                x_w=300.0,
+                x_L=300.0,
             )
-            robot._set_pp_path(path)
+            robot.planner.set_path(path)
             print("Path is ready, Entering IDLE state.")
             state = "IDLE"
 
