@@ -122,10 +122,10 @@
 // ============================================================================
 
 // Outer diameter of each drive wheel (mm)
-#define WHEEL_DIAMETER_MM   74.0f
+#define WHEEL_DIAMETER_MM   72.0f
 
 // Centre-to-centre track width between the two drive wheels (mm)
-#define WHEEL_BASE_MM       333.0f
+#define WHEEL_BASE_MM       290.0f
 
 // Initial theta (degree)
 #define INITIAL_THETA       90.0f

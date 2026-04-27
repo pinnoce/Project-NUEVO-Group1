@@ -13,10 +13,10 @@ import numpy as np
 # Robot build configuration
 # ---------------------------------------------------------------------------
 
-TAG_ID = 11 # set aruco tag ID 11 
+TAG_ID = 19 # set aruco tag ID 11 
 POSITION_UNIT = Unit.MM
-WHEEL_DIAMETER = 74.0
-WHEEL_BASE = 333.0
+WHEEL_DIAMETER = 72.0
+WHEEL_BASE = 290.0
 INITIAL_THETA_DEG = 90.0
 
 LEFT_WHEEL_MOTOR = Motor.DC_M1
@@ -74,11 +74,12 @@ def run(robot: Robot) -> None:
             #     (0.0, 2500.0),
             #     (1000.0, 2500.0),
             # ]
-            # left lane
+            # left lane 
             path_control_points = [
-                (300.0,   0.0),
-                (300.0, 2500.0),
-                (1300.0, 2500.0),
+                (0.0, 500.0),
+                (500.0, 500.0),
+                (500.0, 0.0),
+                (0.0, 0.0),
             ]
 
             path = densify_polyline(path_control_points, spacing=400.0)
@@ -96,7 +97,7 @@ def run(robot: Robot) -> None:
                 offset=270.0,
                 lane_width=500.0,
                 obstacle_avoidance=True,
-                x_L=300.0,
+                x_L=0.0,
             )
             robot.planner.set_path(path)
             print("Path is ready, Entering IDLE state.")
