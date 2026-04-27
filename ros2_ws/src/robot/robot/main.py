@@ -76,10 +76,11 @@ def run(robot: Robot) -> None:
             # ]
             # left lane 
             path_control_points = [
-                (0.0, 500.0),
-                (500.0, 500.0),
-                (500.0, 0.0),
-                (0.0, 0.0),
+                (0.0, 3350.0),
+                (-20.0, 3400.0),
+                (300.0, 3400.0),
+                (350.0, 3450.0),
+                (350.0, 600.0),
             ]
 
             path = densify_polyline(path_control_points, spacing=400.0)
@@ -94,7 +95,7 @@ def run(robot: Robot) -> None:
                 safe_dist=250.0,
                 avoidance_delay=150,
                 alpha_Ld=0.7,
-                offset=270.0,
+                offset=0.0,
                 lane_width=500.0,
                 obstacle_avoidance=True,
                 x_L=0.0,
