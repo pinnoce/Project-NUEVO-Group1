@@ -68,13 +68,6 @@ def run(robot: Robot) -> None:
         if state == "INIT":
             start_robot(robot)
             print("[FSM] INIT (odometry reset)")
-            # center lane
-            # path_control_points = [
-            #     (0.0,   0.0),
-            #     (0.0, 2500.0),
-            #     (1000.0, 2500.0),
-            # ]
-            # left lane 
             path_control_points = [
                 (0.0, 3350.0),
                 (-20.0, 3400.0),
@@ -87,15 +80,15 @@ def run(robot: Robot) -> None:
 
             robot._nav_follow_pp_path(
                 lookahead_distance=100.0,
-                max_linear_speed=140.0,
-                max_angular_speed=1.5,
+                max_linear_speed=100.0,
+                max_angular_speed=1.0,
                 goal_tolerance=20.0,
                 obstacles_range=450.0,
                 view_angle=math.radians(70.0),
                 safe_dist=250.0,
                 avoidance_delay=150,
                 alpha_Ld=0.7,
-                offset=0.0,
+                offset=270.0,
                 lane_width=500.0,
                 obstacle_avoidance=True,
                 x_L=0.0,
