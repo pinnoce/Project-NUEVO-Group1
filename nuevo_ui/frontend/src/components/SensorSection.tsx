@@ -1036,10 +1036,6 @@ export function SensorSection({ source }: SensorSectionProps) {
     }
   }, [source, calibrationOpen, imu?.magCalibrated, magCal?.state]);
 
-  if (source === 'rpi') {
-    return <PlaceholderCard label="RPi" />;
-  }
-
   if (!hasAny) {
     return <PlaceholderCard label="Arduino" />;
   }
