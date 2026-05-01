@@ -139,10 +139,12 @@ else
     BUILD_CMD='
 set -e
 cd "$FRONTEND_DIR"
+export CI=true
+export npm_config_progress=false
 if [ -f package-lock.json ]; then
-    npm ci
+    npm ci --no-audit --no-fund
 else
-    npm install
+    npm install --no-audit --no-fund
 fi
 npm run build
 find "$BACKEND_STATIC_DIR" -mindepth 1 ! -name ".gitkeep" -exec rm -rf {} +
@@ -150,6 +152,7 @@ cp -a dist/. "$BACKEND_STATIC_DIR"/
 '
 
     echo "  Building frontend in $FRONTEND_DIR ..."
+    echo "  This can take several minutes on a Raspberry Pi the first time."
     "${BUILD_RUNNER[@]}" bash -lc "$BUILD_CMD"
     echo "  Frontend copied to $BACKEND_STATIC_DIR"
 fi

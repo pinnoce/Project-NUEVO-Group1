@@ -23,6 +23,19 @@ run_docker() {
     fi
 }
 
+exec_docker() {
+    if [[ "${use_sg_docker}" -eq 1 ]]; then
+        local cmd="docker"
+        local arg
+        for arg in "$@"; do
+            cmd+=" $(sh_quote "$arg")"
+        done
+        exec sg docker -c "$cmd"
+    else
+        exec docker "$@"
+    fi
+}
+
 ensure_docker_access() {
     local err_file
     err_file="$(mktemp)"
@@ -156,7 +169,7 @@ else
     run_docker compose -f "${compose_file}" up -d --wait "${service}"
 fi
 
-exec run_docker compose -f "${compose_file}" exec "${service}" bash -lc '
+exec_docker compose -f "${compose_file}" exec "${service}" bash -lc '
 source /opt/ros/jazzy/setup.bash
 cd /ros2_ws
 
