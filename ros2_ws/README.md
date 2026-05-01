@@ -198,12 +198,14 @@ should not need to install or debug `libcamera` inside Docker.
 
 ### 4. Build the Frontend Once
 
-The bridge serves the built web UI. Build the frontend before starting the ROS
-container:
+On the Raspberry Pi, `sudo ./ros2_ws/setup_rpi.sh` now builds the frontend and
+copies it into `nuevo_ui/backend/static/` automatically.
+
+If you need to rebuild the UI manually after frontend changes, run:
 
 ```bash
 cd nuevo_ui/frontend
-npm install
+npm ci
 npm run build
 cd ../..
 cp -r nuevo_ui/frontend/dist/. nuevo_ui/backend/static/

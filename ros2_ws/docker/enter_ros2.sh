@@ -4,6 +4,59 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
+use_sg_docker=0
+
+sh_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+run_docker() {
+    if [[ "${use_sg_docker}" -eq 1 ]]; then
+        local cmd="docker"
+        local arg
+        for arg in "$@"; do
+            cmd+=" $(sh_quote "$arg")"
+        done
+        sg docker -c "$cmd"
+    else
+        docker "$@"
+    fi
+}
+
+ensure_docker_access() {
+    local err_file
+    err_file="$(mktemp)"
+
+    if docker info >/dev/null 2>"${err_file}"; then
+        rm -f "${err_file}"
+        return 0
+    fi
+
+    local err_text
+    err_text="$(cat "${err_file}")"
+    rm -f "${err_file}"
+
+    if grep -qi 'permission denied while trying to connect to the docker API' <<<"${err_text}"; then
+        local current_user docker_members
+        current_user="$(id -un)"
+        docker_members="$(getent group docker 2>/dev/null | awk -F: '{print $4}')"
+
+        if [[ -n "${docker_members}" ]] && [[ ",${docker_members}," == *",${current_user},"* ]] && command -v sg >/dev/null 2>&1; then
+            if sg docker -c 'docker info >/dev/null' 2>/dev/null; then
+                use_sg_docker=1
+                echo "[enter_ros2] Current shell does not have docker-group access yet; using 'sg docker' for this command."
+                echo "[enter_ros2] Log out and back in later so plain 'docker' works without the fallback."
+                return 0
+            fi
+        fi
+
+        echo "[enter_ros2] Docker access is denied for this shell." >&2
+        echo "[enter_ros2] Log out and back in, or run: newgrp docker" >&2
+    fi
+
+    printf '%s\n' "${err_text}" >&2
+    exit 1
+}
 
 usage() {
     cat <<'EOF'
@@ -85,23 +138,25 @@ else
     esac
 fi
 
-container_id="$(docker compose -f "${compose_file}" ps -q "${service}" 2>/dev/null || true)"
+ensure_docker_access
+
+container_id="$(run_docker compose -f "${compose_file}" ps -q "${service}" 2>/dev/null || true)"
 running="false"
 if [[ -n "${container_id}" ]]; then
-    running="$(docker inspect -f '{{.State.Running}}' "${container_id}" 2>/dev/null || echo false)"
+    running="$(run_docker inspect -f '{{.State.Running}}' "${container_id}" 2>/dev/null || echo false)"
 fi
 
 if [[ "${running}" == "true" && "${build}" -eq 0 ]]; then
     echo "[enter_ros2] Entering existing ${service} container ${container_id:0:12}..."
 elif [[ "${build}" -eq 1 ]]; then
     echo "[enter_ros2] Rebuilding and starting ${service} with docker compose up -d --build --wait..."
-    docker compose -f "${compose_file}" up -d --build --wait "${service}"
+    run_docker compose -f "${compose_file}" up -d --build --wait "${service}"
 else
     echo "[enter_ros2] Starting ${service} with docker compose up -d --wait..."
-    docker compose -f "${compose_file}" up -d --wait "${service}"
+    run_docker compose -f "${compose_file}" up -d --wait "${service}"
 fi
 
-exec docker compose -f "${compose_file}" exec "${service}" bash -lc '
+exec run_docker compose -f "${compose_file}" exec "${service}" bash -lc '
 source /opt/ros/jazzy/setup.bash
 cd /ros2_ws
 

@@ -5,6 +5,7 @@
 #   1. Hardware UART enable (Arduino bridge on /dev/ttyAMA0)
 #   2. SysRq hardening (prevents accidental read-only filesystem corruption)
 #   3. Docker + Docker Compose installation
+#   4. Frontend production build for nuevo_bridge
 #
 # Run on the Raspberry Pi:
 #   sudo bash setup_rpi.sh
@@ -15,6 +16,9 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "Error: run this script with sudo." >&2
     exit 1
 fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 BOOT=/boot/firmware
 
@@ -33,7 +37,7 @@ CONFIG="$BOOT/config.txt"
 # enable_uart=1 and dtoverlay=uart0-pi5 must be present in config.txt,
 # and the OS must not claim the port as a serial console.
 
-echo "=== [1/3] Enabling hardware UART ==="
+echo "=== [1/4] Enabling hardware UART ==="
 
 mount -o remount,rw "$BOOT"
 
@@ -65,7 +69,7 @@ echo "  cmdline: $(cat "$CMDLINE")"
 # the Arduino UART. This disables sysrq entirely as defence-in-depth.
 
 echo ""
-echo "=== [2/3] Disabling SysRq ==="
+echo "=== [2/4] Disabling SysRq ==="
 echo "kernel.sysrq=0" > /etc/sysctl.d/99-disable-sysrq.conf
 sysctl -w kernel.sysrq=0 > /dev/null
 echo "  kernel.sysrq=$(cat /proc/sys/kernel/sysrq) (persists across reboots)"
@@ -73,7 +77,7 @@ echo "  kernel.sysrq=$(cat /proc/sys/kernel/sysrq) (persists across reboots)"
 # ── 3. Docker + Docker Compose (section 3.4 of Lab 1) ───────────────────────
 
 echo ""
-echo "=== [3/3] Installing Docker ==="
+echo "=== [3/4] Installing Docker ==="
 
 if command -v docker &>/dev/null; then
     echo "  Docker already installed: $(docker --version)"
@@ -101,6 +105,55 @@ else
     echo "  Warning: 'docker compose' not available — may need a newer Docker version."
 fi
 
+# ── 4. Frontend production build ────────────────────────────────────────────
+
+echo ""
+echo "=== [4/4] Building frontend for nuevo_bridge ==="
+
+if command -v node &>/dev/null && command -v npm &>/dev/null; then
+    echo "  Node.js already installed: $(node --version)"
+    echo "  npm already installed: $(npm --version)"
+else
+    echo "  Installing Node.js and npm ..."
+    apt-get update
+    apt-get install -y nodejs npm
+    echo "  Node.js installed: $(node --version)"
+    echo "  npm installed: $(npm --version)"
+fi
+
+ACTUAL_USER="${SUDO_USER:-$USER}"
+FRONTEND_DIR="${REPO_ROOT}/nuevo_ui/frontend"
+BACKEND_STATIC_DIR="${REPO_ROOT}/nuevo_ui/backend/static"
+export FRONTEND_DIR BACKEND_STATIC_DIR
+
+if [ ! -d "$FRONTEND_DIR" ] || [ ! -d "$BACKEND_STATIC_DIR" ]; then
+    echo "  Warning: frontend/backend directories not found under $REPO_ROOT — skipping UI build."
+else
+    if [ "$ACTUAL_USER" = "root" ]; then
+        BUILD_RUNNER=()
+        echo "  Warning: running frontend build as root because no invoking non-root user was detected."
+    else
+        BUILD_RUNNER=(runuser -u "$ACTUAL_USER" --)
+    fi
+
+    BUILD_CMD='
+set -e
+cd "$FRONTEND_DIR"
+if [ -f package-lock.json ]; then
+    npm ci
+else
+    npm install
+fi
+npm run build
+find "$BACKEND_STATIC_DIR" -mindepth 1 ! -name ".gitkeep" -exec rm -rf {} +
+cp -a dist/. "$BACKEND_STATIC_DIR"/
+'
+
+    echo "  Building frontend in $FRONTEND_DIR ..."
+    "${BUILD_RUNNER[@]}" bash -lc "$BUILD_CMD"
+    echo "  Frontend copied to $BACKEND_STATIC_DIR"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 
 echo ""
@@ -111,6 +164,7 @@ echo "  UART          : enable_uart=1 + dtoverlay=uart0-pi5 in config.txt"
 echo "  Serial console: removed from cmdline.txt"
 echo "  SysRq         : disabled (0)"
 echo "  Docker        : $(docker --version 2>/dev/null || echo 'installed')"
+echo "  Frontend      : $(if [ -f "$REPO_ROOT/nuevo_ui/backend/static/index.html" ]; then echo 'built into nuevo_ui/backend/static'; else echo 'not built'; fi)"
 echo ""
 echo "Reboot to apply UART and cmdline changes:"
 echo "  sudo reboot"
