@@ -248,6 +248,12 @@ function clearedRobotState(connection: ConnectionData | null, serialConnected: b
     ioOutputRaw: null,
     dcPidCache: {},
     stepConfigCache: {},
+    fusedPose: null,
+    fusedPoseTrail: [],
+    odometryTrail: [],
+    gpsStatus: null,
+    lidarPoints: null,
+    rosNodes: [],
   }
 }
 

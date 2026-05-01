@@ -109,8 +109,13 @@ class NewExample(Node):
             f'threshold={GOAL_THRESHOLD_MM:.0f} mm'
         )
 
+    def _pose_rad(self) -> tuple[float, float, float]:
+        """Return current pose as (x_mm, y_mm, theta_rad)."""
+        x, y, theta_deg = self._robot.get_fused_pose()
+        return x, y, math.radians(theta_deg)
+
     def _on_scan(self, msg: LaserScan) -> None:
-        pose = self._robot.get_fused_pose()  # (x_mm, y_mm, theta_rad)
+        pose = self._pose_rad()
         pts_robot = self._scanner.process(msg)
         pts_world = self._scanner.to_world_frame(pts_robot, pose)
 
@@ -131,7 +136,7 @@ class NewExample(Node):
         if self._goal_reached:
             return
 
-        pose = self._robot.get_fused_pose()
+        pose = self._pose_rad()
         with self._lock:
             obs = self._obstacles.copy()
 

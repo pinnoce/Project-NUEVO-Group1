@@ -348,19 +348,20 @@ class BridgeNode(Node):
         })
 
     def _on_tag_detections(self, msg: TagDetectionArray) -> None:
+        if not msg.detections:
+            return  # empty batch — don't advance staleness timer or broadcast
         now = time.time()
         self._last_tag_time = now
-        if msg.detections:
-            det = msg.detections[0]
-            self._last_tag_data = {
-                "is_detected": True,
-                "tag_id": int(det.tag_id),
-                "x": float(det.x) * 1000.0,  # metres → mm
-                "y": float(det.y) * 1000.0,
-            }
+        det = msg.detections[0]
+        self._last_tag_data = {
+            "is_detected": True,
+            "tag_id": int(det.tag_id),
+            "x": float(det.x) * 1000.0,  # metres → mm
+            "y": float(det.y) * 1000.0,
+        }
         self._ws_broadcast({
             "topic": "gps_status",
-            "data": {**self._last_tag_data, "is_detected": True},
+            "data": self._last_tag_data,
             "ts": now,
         })
 
