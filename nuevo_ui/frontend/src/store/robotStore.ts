@@ -10,6 +10,7 @@ import type {
   DCStateAllData,
   FusedPoseData,
   GpsStatusData,
+  TagDetectionEntry,
   IMUData,
   IOInputStateData,
   IOOutputStateData,
@@ -252,6 +253,7 @@ function clearedRobotState(connection: ConnectionData | null, serialConnected: b
     fusedPoseTrail: [],
     odometryTrail: [],
     gpsStatus: null,
+    tagDetections: [],
     lidarPoints: [],
     rosNodes: [],
   }
@@ -296,6 +298,7 @@ interface RobotState {
   fusedPoseTrail: Array<[number, number]>   // [x_mm, y_mm] history
   odometryTrail: Array<[number, number]>    // [x_mm, y_mm] from raw kinematics
   gpsStatus: GpsStatusData | null
+  tagDetections: TagDetectionEntry[]  // all currently visible tags (clears when none detected)
   lidarPoints: LidarPointsData[]   // rolling window — newest last
   rosNodes: RosNodeEntry[]
   dispatch: (topic: string, data: any, ts?: number) => void
@@ -336,6 +339,7 @@ export const useRobotStore = create<RobotState>((set) => ({
   fusedPoseTrail: [],
   odometryTrail: [],
   gpsStatus: null,
+  tagDetections: [],
   lidarPoints: [],
   rosNodes: [],
 
@@ -728,6 +732,10 @@ export const useRobotStore = create<RobotState>((set) => ({
 
       case 'gps_status':
         set({ gpsStatus: data as GpsStatusData })
+        break
+
+      case 'tag_detections':
+        set({ tagDetections: data as TagDetectionEntry[] })
         break
 
       case 'lidar_world_points': {

@@ -72,7 +72,7 @@ export function RosNodesCard() {
       </button>
 
       {open && (
-        <div className="space-y-1 max-h-64 overflow-y-auto">
+        <div className="space-y-1">
           {nodes.length === 0 ? (
             <p className="text-xs text-white/30 italic">No data yet — waiting for bridge…</p>
           ) : (

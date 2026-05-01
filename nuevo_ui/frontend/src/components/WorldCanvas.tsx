@@ -40,7 +40,8 @@ export function WorldCanvas() {
   const fusedPose   = useRobotStore((s) => s.fusedPose)
   const fusedTrail  = useRobotStore((s) => s.fusedPoseTrail)
   const odomTrail   = useRobotStore((s) => s.odometryTrail)
-  const gpsStatus   = useRobotStore((s) => s.gpsStatus)
+  const gpsStatus     = useRobotStore((s) => s.gpsStatus)
+  const tagDetections = useRobotStore((s) => s.tagDetections)
   const lidarPoints = useRobotStore((s) => s.lidarPoints)
 
   const [trails, setTrails] = useState<Trails>({ odom: true, gps: true, fused: true, lidar: true })
@@ -65,7 +66,7 @@ export function WorldCanvas() {
     if (trails.fused)  allPts.push(...fusedTrail)
     if (trails.odom)   allPts.push(...odomTrail)
     if (fusedPose)     allPts.push([fusedPose.x, fusedPose.y])
-    if (trails.gps && gpsStatus?.is_detected) allPts.push([gpsStatus.x, gpsStatus.y])
+    if (trails.gps) for (const t of tagDetections) allPts.push([t.x, t.y])
     if (trails.lidar) {
       for (const frame of lidarPoints)
         for (let i = 0; i < frame.xs.length; i++)
@@ -88,9 +89,13 @@ export function WorldCanvas() {
     const rangeY = Math.max(ext.maxY - ext.minY, 1)
     const scale  = Math.min(W / rangeX, H / rangeY)
 
+    // Centre the content so padding is equal on all sides regardless of aspect ratio.
+    const ox = (W - rangeX * scale) / 2
+    const oy = (H - rangeY * scale) / 2
+
     const toC = (wx: number, wy: number): [number, number] => [
-      (wx - ext.minX) * scale,
-      H - (wy - ext.minY) * scale,
+      ox + (wx - ext.minX) * scale,
+      oy + rangeY * scale - (wy - ext.minY) * scale,
     ]
 
     // Translucent dark background (original style)
@@ -119,12 +124,12 @@ export function WorldCanvas() {
     }
 
     // Origin cross
-    const [ox, oy] = toC(0, 0)
-    if (ox >= 0 && ox <= W && oy >= 0 && oy <= H) {
+    const [originX, originY] = toC(0, 0)
+    if (originX >= 0 && originX <= W && originY >= 0 && originY <= H) {
       ctx.strokeStyle = 'rgba(255,255,255,0.20)'
       ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(ox - 6, oy); ctx.lineTo(ox + 6, oy); ctx.stroke()
-      ctx.beginPath(); ctx.moveTo(ox, oy - 6); ctx.lineTo(ox, oy + 6); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(originX - 6, originY); ctx.lineTo(originX + 6, originY); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(originX, originY - 6); ctx.lineTo(originX, originY + 6); ctx.stroke()
     }
 
     // Scale label
@@ -160,14 +165,21 @@ export function WorldCanvas() {
       ctx.stroke()
     }
 
-    // GPS cross (yellow)
-    if (trails.gps && gpsStatus?.is_detected) {
-      const [cx, cy] = toC(gpsStatus.x, gpsStatus.y)
+    // GPS tags — yellow cross + ID label for every currently detected tag
+    if (trails.gps && tagDetections.length > 0) {
       const arm = 6
       ctx.strokeStyle = 'rgba(250,204,21,0.90)'
       ctx.lineWidth = 2
-      ctx.beginPath(); ctx.moveTo(cx - arm, cy); ctx.lineTo(cx + arm, cy); ctx.stroke()
-      ctx.beginPath(); ctx.moveTo(cx, cy - arm); ctx.lineTo(cx, cy + arm); ctx.stroke()
+      ctx.fillStyle = 'rgba(250,204,21,0.90)'
+      ctx.font = '10px monospace'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      for (const tag of tagDetections) {
+        const [cx, cy] = toC(tag.x, tag.y)
+        ctx.beginPath(); ctx.moveTo(cx - arm, cy); ctx.lineTo(cx + arm, cy); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(cx, cy - arm); ctx.lineTo(cx, cy + arm); ctx.stroke()
+        ctx.fillText(`#${tag.tag_id}`, cx + arm + 2, cy)
+      }
     }
 
     // Lidar cloud — all frames in the rolling window, oldest most transparent
@@ -215,7 +227,7 @@ export function WorldCanvas() {
       ctx.closePath()
       ctx.fill()
     }
-  }, [fusedPose, fusedTrail, odomTrail, gpsStatus, lidarPoints, trails])
+  }, [fusedPose, fusedTrail, odomTrail, gpsStatus, tagDetections, lidarPoints, trails])
 
   return (
     <div className="relative rounded-2xl p-4 backdrop-blur-2xl bg-white/10 border border-white/20 shadow-xl">

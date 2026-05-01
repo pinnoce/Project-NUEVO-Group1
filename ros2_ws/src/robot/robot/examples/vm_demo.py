@@ -1,8 +1,9 @@
 """
 vm_demo.py — Fake robot + lidar + GPS data for UI development on a VM.
 
-Publishes /fused_pose, /lidar_world_points, and /tag_detections so all three
+Publishes /fused_pose, /lidar_world_points, and /tag_detections so the
 RPi Sensors panels (World Map, GPS card, ROS Nodes) show live data.
+Odometry trail in the UI comes from the Arduino via the bridge as normal.
 
 Run inside the Docker container after sourcing ROS2:
 
@@ -20,7 +21,7 @@ import random
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from bridge_interfaces.msg import FusedPose, LidarWorldPoints, SensorKinematics, TagDetectionArray, TagDetection
+from bridge_interfaces.msg import FusedPose, LidarWorldPoints, TagDetectionArray, TagDetection
 
 # ── Tune these ────────────────────────────────────────────────────────────────
 # Venue: 5×6 grid, 610 mm cells. Origin = centre of bottom border of bottom-left cell.
@@ -42,9 +43,6 @@ GPS_RADIUS_MM      = 1200.0  # GPS tag orbit radius around venue centre
 GPS_PERIOD_S       = 35.0    # seconds per GPS orbit lap (different speed)
 GPS_VISIBLE_S      = 3.0     # seconds tag is "detected" per cycle
 GPS_HIDDEN_S       = 2.0     # seconds tag is "lost" per cycle
-
-# Odometry drift — simulates wheel encoder accumulation error relative to fused pose.
-ODOM_DRIFT_PER_LAP_MM = 150.0   # extra radius added per full lap (spiral outward)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -58,7 +56,6 @@ class VMDemo(Node):
         )
         self._pose_pub  = self.create_publisher(FusedPose,          '/fused_pose',         best_effort)
         self._lidar_pub = self.create_publisher(LidarWorldPoints,   '/lidar_world_points', best_effort)
-        self._odom_pub  = self.create_publisher(SensorKinematics,   '/odometry',           best_effort)
         self._gps_pub   = self.create_publisher(TagDetectionArray,  '/tag_detections',     10)
 
         self._t = 0.0
@@ -90,21 +87,6 @@ class VMDemo(Node):
         fp.theta      = float(rtheta)
         fp.gps_active = gps_visible
         self._pose_pub.publish(fp)
-
-        # ── Odometry (drifts outward by ODOM_DRIFT_PER_LAP_MM per lap) ───────
-        laps = self._t / CIRCLE_PERIOD_S
-        odom_r = CIRCLE_RADIUS_MM + laps * ODOM_DRIFT_PER_LAP_MM
-        ox_pos = VENUE_CX_MM + odom_r * math.cos(phase)
-        oy_pos = VENUE_CY_MM + odom_r * math.sin(phase)
-        sk = SensorKinematics()
-        sk.header.stamp = fp.header.stamp
-        sk.x     = float(ox_pos)
-        sk.y     = float(oy_pos)
-        sk.theta = float(rtheta)
-        sk.vx    = 0.0
-        sk.vy    = 0.0
-        sk.v_theta = 0.0
-        self._odom_pub.publish(sk)
 
         # ── Fake GPS tag detection ────────────────────────────────────────────
         gps_phase = (self._t / GPS_PERIOD_S) * 2.0 * math.pi

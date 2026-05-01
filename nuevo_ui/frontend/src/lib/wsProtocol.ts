@@ -350,6 +350,12 @@ export interface GpsStatusData {
   y: number   // world-frame mm
 }
 
+export interface TagDetectionEntry {
+  tag_id: number
+  x: number   // world-frame mm
+  y: number   // world-frame mm
+}
+
 export interface LidarPointsData {
   xs: number[]        // world-frame mm, parallel with ys
   ys: number[]
