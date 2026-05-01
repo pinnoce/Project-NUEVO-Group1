@@ -163,31 +163,35 @@ export function WorldCanvas() {
       }
     }
 
-    // Robot at fused pose
+    // Robot at fused pose — matches OdometryCard style (blue dot + heading arrow)
     if (fusedPose) {
       const [rx, ry] = toC(fusedPose.x, fusedPose.y)
-      const arrowLen = 14
-      const hx = rx + arrowLen * Math.cos(fusedPose.theta)
-      const hy = ry - arrowLen * Math.sin(fusedPose.theta)
-      const nx = hx - rx, ny = hy - ry
-      const len = Math.hypot(nx, ny) || 1
-      const ux = nx / len, uy = ny / len
+      const headingCanvas = -fusedPose.theta  // world CCW → canvas CW
+      const arrowLen = Math.max(12, Math.min(28, Math.min(rangeX, rangeY) * scale * 0.06))
+      const nx = Math.cos(headingCanvas), ny = Math.sin(headingCanvas)
+      const tipX = rx + nx * arrowLen, tipY = ry + ny * arrowLen
       const hw = 4
 
+      // Body
       ctx.beginPath()
       ctx.arc(rx, ry, 7, 0, Math.PI * 2)
-      ctx.fillStyle   = 'rgba(255,255,255,0.90)'
+      ctx.fillStyle   = 'rgba(96,165,250,0.25)'
+      ctx.strokeStyle = '#60a5fa'
+      ctx.lineWidth   = 1.5
       ctx.fill()
+      ctx.stroke()
 
-      ctx.strokeStyle = 'rgba(255,255,255,0.90)'
+      // Heading arrow shaft
+      ctx.strokeStyle = '#60a5fa'
       ctx.lineWidth   = 2
-      ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(hx, hy); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(tipX, tipY); ctx.stroke()
 
-      ctx.fillStyle = 'rgba(255,255,255,0.90)'
+      // Arrowhead
+      ctx.fillStyle = '#60a5fa'
       ctx.beginPath()
-      ctx.moveTo(hx, hy)
-      ctx.lineTo(hx - ux * 8 + uy * hw, hy - uy * 8 - ux * hw)
-      ctx.lineTo(hx - ux * 8 - uy * hw, hy - uy * 8 + ux * hw)
+      ctx.moveTo(tipX, tipY)
+      ctx.lineTo(tipX - nx * 8 + ny * hw, tipY - ny * 8 - nx * hw)
+      ctx.lineTo(tipX - nx * 8 - ny * hw, tipY - ny * 8 + nx * hw)
       ctx.closePath()
       ctx.fill()
     }
