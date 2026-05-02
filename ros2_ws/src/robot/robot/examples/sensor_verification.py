@@ -54,10 +54,11 @@ RIGHT_WHEEL_MOTOR        = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
 # ── Lidar mount & filter ───────────────────────────────────────────────────────
-LIDAR_MOUNT_FORWARD_MM = 0.0    # lidar position in robot body frame (mm, forward)
-LIDAR_MOUNT_LEFT_MM    = 0.0    # lidar position in robot body frame (mm, left)
-LIDAR_MOUNT_THETA_DEG  = 0.0    # lidar heading offset relative to robot forward (deg, CCW+)
-                                 # use 180.0 if lidar is mounted facing backward
+# Body frame origin = midpoint of the two drive wheels. +x = robot forward, +y = robot left.
+LIDAR_MOUNT_X_MM      = 0.0    # lidar x position in robot body frame (mm, +x = forward)
+LIDAR_MOUNT_Y_MM      = 0.0    # lidar y position in robot body frame (mm, +y = left)
+LIDAR_MOUNT_THETA_DEG = 0.0    # lidar heading offset relative to robot forward (deg, CCW+)
+                                # use 180.0 if lidar is mounted facing backward
 
 LIDAR_RANGE_MIN_MM     = 150.0  # discard returns closer than this (mm)
 LIDAR_RANGE_MAX_MM     = 6000.0 # discard returns farther than this (mm)
@@ -102,8 +103,8 @@ def configure_robot(robot: Robot) -> None:
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
     robot.set_lidar_mount(
-        forward_mm=LIDAR_MOUNT_FORWARD_MM,
-        left_mm=LIDAR_MOUNT_LEFT_MM,
+        x_mm=LIDAR_MOUNT_X_MM,
+        y_mm=LIDAR_MOUNT_Y_MM,
         theta_deg=LIDAR_MOUNT_THETA_DEG,
     )
     robot.set_lidar_filter(

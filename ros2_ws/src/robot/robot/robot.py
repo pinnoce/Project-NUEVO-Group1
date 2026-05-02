@@ -206,11 +206,11 @@ class Robot:
     DEFAULT_RIGHT_WHEEL_DIR_INVERTED: bool = True
     POSITION_ALPHA = 0.10  # complementary filter GPS weight for position fusion
     ORIENTATION_ALPHA = 0.0  # complementary filter IMU weight for orientation fusion (IMU is not working well, so default to pure odometry for now)
-    TAG_X_OFFSET_MM = 0.0   # ArUco tag position in robot body frame x (mm, forward)
-    TAG_Y_OFFSET_MM = 0.0   # ArUco tag position in robot body frame y (mm, left)
+    TAG_X_OFFSET_MM = 0.0   # ArUco tag position in robot body frame x (mm, +x = robot forward)
+    TAG_Y_OFFSET_MM = 0.0   # ArUco tag position in robot body frame y (mm, +y = robot left)
 
-    LIDAR_MOUNT_X_MM:      float = 0.0    # lidar position in robot body frame x (mm, forward)
-    LIDAR_MOUNT_Y_MM:      float = 0.0    # lidar position in robot body frame y (mm, left)
+    LIDAR_MOUNT_X_MM:      float = 0.0    # lidar position in robot body frame x (mm, +x = robot forward)
+    LIDAR_MOUNT_Y_MM:      float = 0.0    # lidar position in robot body frame y (mm, +y = robot left)
     LIDAR_MOUNT_THETA_DEG: float = 0.0   # lidar heading offset relative to robot forward (deg, CCW+)
 
     LIDAR_RANGE_MIN_MM:  float = 150.0   # discard returns closer than this (mm)
@@ -275,10 +275,10 @@ class Robot:
         self._gps_timeout_s:     float       = 1.0   # seconds before GPS is treated as stale
         self._gps_offset_x_mm:   float       = 0.0   # GPS frame → arena frame translation x
         self._gps_offset_y_mm:   float       = 0.0   # GPS frame → arena frame translation y
-        self._tag_body_offset_x_mm:  float = self.TAG_X_OFFSET_MM     # tag position in robot body frame x (mm, forward)
-        self._tag_body_offset_y_mm:  float = self.TAG_Y_OFFSET_MM     # tag position in robot body frame y (mm, left)
-        self._lidar_mount_x_mm:      float = self.LIDAR_MOUNT_X_MM    # lidar mount x in robot body frame (mm, forward)
-        self._lidar_mount_y_mm:      float = self.LIDAR_MOUNT_Y_MM    # lidar mount y in robot body frame (mm, left)
+        self._tag_body_offset_x_mm:  float = self.TAG_X_OFFSET_MM     # tag position in robot body frame (+x = forward)
+        self._tag_body_offset_y_mm:  float = self.TAG_Y_OFFSET_MM     # tag position in robot body frame (+y = left)
+        self._lidar_mount_x_mm:      float = self.LIDAR_MOUNT_X_MM    # lidar mount in robot body frame (+x = forward)
+        self._lidar_mount_y_mm:      float = self.LIDAR_MOUNT_Y_MM    # lidar mount in robot body frame (+y = left)
         self._lidar_mount_theta_rad: float = math.radians(self.LIDAR_MOUNT_THETA_DEG)
         self._lidar_range_min_mm:    float = self.LIDAR_RANGE_MIN_MM
         self._lidar_range_max_mm:    float = self.LIDAR_RANGE_MAX_MM
@@ -1910,15 +1910,14 @@ class Robot:
             self._gps_offset_x_mm = float(offset_x_mm)
             self._gps_offset_y_mm = float(offset_y_mm)
 
-    def set_tag_body_offset(self, forward_mm: float, left_mm: float) -> None:
+    def set_tag_body_offset(self, x_mm: float, y_mm: float) -> None:
         """
-        Set the ArUco tag mounting offset relative to the robot body origin (mm).
+        Set the ArUco tag mounting position in the robot body frame (mm).
 
-        If the tag is not centred on the robot's body origin, pass the tag's
-        position in the robot's local frame here so the fusion corrects for it:
+        Origin is the midpoint of the two drive wheels. +x = robot forward, +y = robot left.
 
-        - ``forward_mm`` — positive = tag is ahead of body centre.
-        - ``left_mm``    — positive = tag is to the left of body centre.
+        - ``x_mm`` — tag x position in body frame (positive = forward of wheel midpoint).
+        - ``y_mm`` — tag y position in body frame (positive = left of wheel midpoint).
 
         The correction is applied every time a tag detection arrives by rotating
         the body-frame offset into the arena frame using the current fused heading
@@ -1927,25 +1926,27 @@ class Robot:
         Default is (0, 0) — tag assumed to be at the body origin.
         """
         with self._lock:
-            self._tag_body_offset_x_mm = float(forward_mm)
-            self._tag_body_offset_y_mm = float(left_mm)
+            self._tag_body_offset_x_mm = float(x_mm)
+            self._tag_body_offset_y_mm = float(y_mm)
 
-    def set_lidar_mount(self, forward_mm: float, left_mm: float, theta_deg: float = 0.0) -> None:
+    def set_lidar_mount(self, x_mm: float, y_mm: float, theta_deg: float = 0.0) -> None:
         """
-        Set the lidar mounting position and heading relative to the robot body origin.
+        Set the lidar mounting position and heading in the robot body frame.
 
-        - ``forward_mm`` — positive = lidar is ahead of body centre.
-        - ``left_mm``    — positive = lidar is to the left of body centre.
-        - ``theta_deg``  — heading offset of the lidar relative to robot forward (CCW positive).
-                           Use 180.0 if the lidar is mounted facing backward.
+        Origin is the midpoint of the two drive wheels. +x = robot forward, +y = robot left.
+
+        - ``x_mm``      — lidar x position in body frame (positive = forward of wheel midpoint).
+        - ``y_mm``      — lidar y position in body frame (positive = left of wheel midpoint).
+        - ``theta_deg`` — lidar heading offset relative to robot forward (CCW positive).
+                          Use 180.0 if the lidar is mounted facing backward.
 
         Applied on every scan so scan points are expressed in the robot body frame
         before being used by the planner or published as world-frame points.
         Default is (0, 0, 0) — lidar assumed to be at the body origin, facing forward.
         """
         with self._lock:
-            self._lidar_mount_x_mm      = float(forward_mm)
-            self._lidar_mount_y_mm      = float(left_mm)
+            self._lidar_mount_x_mm      = float(x_mm)
+            self._lidar_mount_y_mm      = float(y_mm)
             self._lidar_mount_theta_rad = math.radians(float(theta_deg))
 
     def set_lidar_filter(
