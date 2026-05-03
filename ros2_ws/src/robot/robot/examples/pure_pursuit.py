@@ -32,35 +32,34 @@ from __future__ import annotations
 
 import time
 
-from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
+from robot.hardware_map import (
+    Button,
+    DEFAULT_FSM_HZ,
+    LED,
+    LIDAR_FOV_DEG,
+    LIDAR_MOUNT_THETA_DEG,
+    LIDAR_MOUNT_X_MM,
+    LIDAR_MOUNT_Y_MM,
+    LIDAR_RANGE_MAX_MM,
+    LIDAR_RANGE_MIN_MM,
+    Motor,
+    TAG_BODY_OFFSET_X_MM,
+    TAG_BODY_OFFSET_Y_MM,
+)
 from robot.robot import FirmwareState, Robot, Unit
 from robot.util import densify_polyline  # noqa: F401 - optional helper for students
 
 
-# ---------------------------------------------------------------------------
-# LiDAR related
-# ---------------------------------------------------------------------------
-
+# Shared lidar/GPS hardware calibration lives in robot/hardware_map.py.
+# If you need to change lidar mount, lidar self-filtering, or GPS tag body
+# offset values, edit ros2_ws/src/robot/robot/hardware_map.py.
+# You can also just set those values here locally if you want.
 ENABLE_LIDAR = False
-
-LIDAR_MOUNT_X_MM = 0.0
-LIDAR_MOUNT_Y_MM = 0.0
-LIDAR_MOUNT_THETA_DEG = 0.0
-LIDAR_RANGE_MIN_MM = 150.0
-LIDAR_RANGE_MAX_MM = 6000.0
-LIDAR_FOV_DEG = (-180.0, 180.0)
-
-
-# ---------------------------------------------------------------------------
-# LiDAR related
-# ---------------------------------------------------------------------------
 
 ENABLE_GPS = False
 
-# ¡IMPORTANT! Update TAG_ID to match your tag
+# IMPORTANT: update TAG_ID to match your tag.
 TAG_ID = -1
-TAG_BODY_OFFSET_X_MM = 0.0
-TAG_BODY_OFFSET_Y_MM = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +137,9 @@ def start_robot(robot: Robot) -> None:
 
 def reset_mission_pose(robot: Robot) -> None:
     robot.reset_odometry()
-    robot.wait_for_pose_update(timeout=0.5)
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+        robot.wait_for_pose_update(timeout=0.5)
 
 
 def show_idle_leds(robot: Robot) -> None:

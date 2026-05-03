@@ -93,10 +93,18 @@ from robot.hardware_map import (
     DCPidLoop,
     DEFAULT_NAV_HZ,
     LEDMode,
+    LIDAR_FOV_DEG,
+    LIDAR_MOUNT_THETA_DEG,
+    LIDAR_MOUNT_X_MM,
+    LIDAR_MOUNT_Y_MM,
+    LIDAR_RANGE_MAX_MM,
+    LIDAR_RANGE_MIN_MM,
     LIMIT_COUNT,
     Motor,
     StepMoveType,
     StepperMotionState,
+    TAG_BODY_OFFSET_X_MM,
+    TAG_BODY_OFFSET_Y_MM,
 )
 
 from robot.robot_impl.hardware import FirmwareState, HardwareMixin
@@ -150,17 +158,17 @@ class Robot(HardwareMixin, SensorsMixin, NavigationMixin, LegacyMixin):
     DEFAULT_RIGHT_WHEEL_DIR_INVERTED: bool = True
     POSITION_ALPHA    = 0.10   # complementary filter GPS weight for position fusion
     ORIENTATION_ALPHA = 0.0    # complementary filter IMU weight for orientation fusion
-    TAG_X_OFFSET_MM   = 0.0   # ArUco tag x in robot body frame (mm, +x = forward)
-    TAG_Y_OFFSET_MM   = 0.0   # ArUco tag y in robot body frame (mm, +y = left)
+    TAG_X_OFFSET_MM   = TAG_BODY_OFFSET_X_MM   # ArUco tag x in robot body frame (mm, +x = forward)
+    TAG_Y_OFFSET_MM   = TAG_BODY_OFFSET_Y_MM   # ArUco tag y in robot body frame (mm, +y = left)
 
-    LIDAR_MOUNT_X_MM:      float = 0.0    # lidar x in robot body frame (mm, +x = forward)
-    LIDAR_MOUNT_Y_MM:      float = 0.0    # lidar y in robot body frame (mm, +y = left)
-    LIDAR_MOUNT_THETA_DEG: float = 0.0   # lidar heading offset relative to robot forward (CCW+)
+    LIDAR_MOUNT_X_MM:      float = LIDAR_MOUNT_X_MM      # lidar x in robot body frame (mm, +x = forward)
+    LIDAR_MOUNT_Y_MM:      float = LIDAR_MOUNT_Y_MM      # lidar y in robot body frame (mm, +y = left)
+    LIDAR_MOUNT_THETA_DEG: float = LIDAR_MOUNT_THETA_DEG # lidar heading offset relative to robot forward (CCW+)
 
-    LIDAR_RANGE_MIN_MM:  float = 150.0   # discard lidar returns closer than this (mm)
-    LIDAR_RANGE_MAX_MM:  float = 6000.0  # discard lidar returns farther than this (mm)
-    LIDAR_FOV_MIN_DEG:   float = -180.0  # FOV window min (deg, 0° = robot +x forward, CCW+)
-    LIDAR_FOV_MAX_DEG:   float =  180.0  # FOV window max
+    LIDAR_RANGE_MIN_MM:  float = LIDAR_RANGE_MIN_MM  # discard lidar returns closer than this (mm)
+    LIDAR_RANGE_MAX_MM:  float = LIDAR_RANGE_MAX_MM  # discard lidar returns farther than this (mm)
+    LIDAR_FOV_MIN_DEG:   float = LIDAR_FOV_DEG[0]    # FOV window min (deg, 0° = robot +x forward, CCW+)
+    LIDAR_FOV_MAX_DEG:   float = LIDAR_FOV_DEG[1]    # FOV window max
 
     _SERVO_MIN_US: int = 1000
     _SERVO_MAX_US: int = 2000

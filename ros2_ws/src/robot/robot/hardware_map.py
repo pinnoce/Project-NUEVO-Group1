@@ -2,7 +2,20 @@ from __future__ import annotations
 
 from enum import IntEnum
 
+# Shared robot sensor calibration.
+# Keep these values aligned with the physical robot so examples can import one
+# source of truth for lidar self-filtering and GPS tag mounting geometry.
+LIDAR_MOUNT_X_MM = 0.0
+LIDAR_MOUNT_Y_MM = 0.0
+LIDAR_MOUNT_THETA_DEG = 0.0
+LIDAR_RANGE_MIN_MM = 150.0
+LIDAR_RANGE_MAX_MM = 6000.0
+LIDAR_FOV_DEG = (-180.0, 180.0)
 
+TAG_BODY_OFFSET_X_MM = 0.0
+TAG_BODY_OFFSET_Y_MM = 0.0
+
+# PCB Hardware Mapping
 class Motor(IntEnum):
     DC_M1 = 1
     DC_M2 = 2

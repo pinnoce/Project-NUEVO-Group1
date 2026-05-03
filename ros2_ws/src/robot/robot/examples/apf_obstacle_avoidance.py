@@ -29,12 +29,32 @@ from __future__ import annotations
 
 import time
 
-from robot.hardware_map import Button, DEFAULT_FSM_HZ, LED, Motor
+from robot.hardware_map import (
+    Button,
+    DEFAULT_FSM_HZ,
+    LED,
+    LIDAR_FOV_DEG,
+    LIDAR_MOUNT_THETA_DEG,
+    LIDAR_MOUNT_X_MM,
+    LIDAR_MOUNT_Y_MM,
+    LIDAR_RANGE_MAX_MM,
+    LIDAR_RANGE_MIN_MM,
+    Motor,
+    TAG_BODY_OFFSET_X_MM,
+    TAG_BODY_OFFSET_Y_MM,
+)
 from robot.robot import FirmwareState, Robot, Unit
 
 
+# Shared lidar/GPS hardware calibration lives in robot/hardware_map.py.
+# If you need to change lidar mount, lidar self-filtering, or GPS tag body
+# offset values, edit ros2_ws/src/robot/robot/hardware_map.py.
+# You can also just set those values here locally if you want.
+ENABLE_LIDAR = True
 ENABLE_GPS = False
-TAG_ID = 11
+
+# IMPORTANT: update TAG_ID to match your robot when GPS is enabled.
+TAG_ID = -1
 
 POSITION_UNIT = Unit.MM
 WHEEL_DIAMETER = 74.0
@@ -72,11 +92,26 @@ def configure_robot(robot: Robot) -> None:
         right_motor_id=RIGHT_WHEEL_MOTOR,
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
-    robot.enable_lidar()
-    robot.start_lidar_world_publisher()
+    if ENABLE_LIDAR:
+        robot.enable_lidar()
+        robot.set_lidar_mount(
+            x_mm=LIDAR_MOUNT_X_MM,
+            y_mm=LIDAR_MOUNT_Y_MM,
+            theta_deg=LIDAR_MOUNT_THETA_DEG,
+        )
+        robot.set_lidar_filter(
+            range_min_mm=LIDAR_RANGE_MIN_MM,
+            range_max_mm=LIDAR_RANGE_MAX_MM,
+            fov_deg=LIDAR_FOV_DEG,
+        )
+        robot.start_lidar_world_publisher()
+        print("[sensor] lidar enabled — subscribing to /scan")
+
     if ENABLE_GPS:
         robot.enable_gps()
         robot.set_tracked_tag_id(TAG_ID)
+        robot.set_tag_body_offset(TAG_BODY_OFFSET_X_MM, TAG_BODY_OFFSET_Y_MM)
+        print(f"[sensor] GPS enabled — tracking ArUco tag {TAG_ID}")
 
 
 def start_robot(robot: Robot) -> None:
@@ -88,7 +123,9 @@ def start_robot(robot: Robot) -> None:
 
 def reset_mission_pose(robot: Robot) -> None:
     robot.reset_odometry()
-    robot.wait_for_pose_update(timeout=0.5)
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+        robot.wait_for_pose_update(timeout=0.5)
 
 
 def show_idle_leds(robot: Robot) -> None:
@@ -156,6 +193,17 @@ def run(robot: Robot) -> None:
                 f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s lookahead={LOOKAHEAD_MM:.0f} mm "
                 f"repulsion_range={REPULSION_RANGE_MM:.0f} mm gain={REPULSION_GAIN:.0f}"
             )
+            if ENABLE_LIDAR:
+                print(
+                    f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
+                    f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_RANGE_MIN_MM:.0f}-"
+                    f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
+                )
+            if ENABLE_GPS:
+                print(
+                    f"[CFG] gps tag_id={TAG_ID} tag_body=({TAG_BODY_OFFSET_X_MM:.0f}, "
+                    f"{TAG_BODY_OFFSET_Y_MM:.0f}) mm"
+                )
             state = "IDLE"
 
         elif state == "IDLE":
