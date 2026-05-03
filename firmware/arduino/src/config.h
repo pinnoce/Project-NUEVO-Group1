@@ -19,7 +19,7 @@
 // FIRMWARE VERSION
 // ============================================================================
 
-#define FIRMWARE_VERSION        0x00090800  // Version 0.9.8
+#define FIRMWARE_VERSION        0x00090900  // Version 0.9.9
 #define TLV_PROTOCOL_VERSION_MAJOR 4
 #define TLV_PROTOCOL_VERSION_MINOR 0
 #define BOARD_REVISION          0       // 0 = unspecified / unknown
