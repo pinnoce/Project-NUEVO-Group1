@@ -151,11 +151,6 @@ class NavigationMixin:
 
         self._odom_traj.append(_raw_odom)
         self._fused_traj.append(_raw_fused)
-        self._node.get_logger().info(
-            f"odom=({_raw_odom[0]:.1f}, {_raw_odom[1]:.1f}) mm  "
-            f"fused=({_raw_fused[0]:.1f}, {_raw_fused[1]:.1f}) mm",
-            throttle_duration_sec=0.5,
-        )
 
         _fp = FusedPose()
         _fp.header.stamp = self._node.get_clock().now().to_msg()
@@ -460,7 +455,7 @@ class NavigationMixin:
         time.sleep(self._SHUTDOWN_SETTLE_S)
         if self.get_state() == FirmwareState.RUNNING:
             self.set_state(FirmwareState.IDLE, timeout=1.0)
-        self.save_trajectory_image()
+        # self.save_trajectory_image()
 
     def set_left_wheel(self, motor_id: int) -> None:
         """Alias for set_odom_left_motor()."""
@@ -1003,8 +998,8 @@ class NavigationMixin:
             next_left_motor, next_left_inverted, next_right_motor, next_right_inverted,
         )
 
-        self._odom_user_configured = True
         self._odom_confirm_event.clear()
+        self._odom_user_configured = True
         self._publish_odom_params(snapshot)
         if timeout <= 0.0:
             return True
@@ -1012,11 +1007,6 @@ class NavigationMixin:
         deadline = time.monotonic() + timeout
         confirmed = False
 
-        # Firmware already schedules a response after /sys_odom_param_set, but
-        # startup ordering and bridge latency can still yield a stale or missed
-        # first echo. Re-query within the timeout window instead of treating the
-        # first miss as a hard failure.
-        self.request_odometry_parameters()
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0.0:
