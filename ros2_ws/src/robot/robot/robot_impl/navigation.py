@@ -916,10 +916,15 @@ class NavigationMixin:
                 self.stop()
                 return
 
+            obstacles_world = self._obstacles_robot_to_world_mm(
+                self._get_obstacles_mm(),
+                (x_mm, y_mm, theta_rad),
+            )
+
             linear_mm, angular_rad_s = planner.navigate_to_goal(
                 (x_mm, y_mm, theta_rad),
                 (goal_x_mm, goal_y_mm),
-                self._get_obstacles_mm(),
+                obstacles_world,
             )
             self._send_body_velocity_mm(linear_mm, angular_rad_s)
             if not self._sleep_with_cancel(dt):

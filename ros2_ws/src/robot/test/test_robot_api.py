@@ -641,7 +641,7 @@ class RobotApiTests(unittest.TestCase):
         planner_instance.navigate_to_goal.return_value = (42.0, -0.5)
         sent_commands: list[tuple[float, float]] = []
 
-        self.robot._get_pose_mm = lambda: (0.0, 0.0, 0.0)
+        self.robot._get_pose_mm = lambda: (10.0, 20.0, math.pi / 2.0)
         self.robot._get_obstacles_mm = lambda: np.array([[100.0, 0.0]], dtype=float)
         self.robot._send_body_velocity_mm = lambda linear, angular: sent_commands.append((linear, angular))
         self.robot._sleep_with_cancel = lambda _seconds: False
@@ -668,7 +668,29 @@ class RobotApiTests(unittest.TestCase):
             goal_tolerance=20.0,
         )
         planner_instance.navigate_to_goal.assert_called_once()
+        args, _kwargs = planner_instance.navigate_to_goal.call_args
+        self.assertEqual(args[0], (10.0, 20.0, math.pi / 2.0))
+        self.assertEqual(args[1], (500.0, 0.0))
+        np.testing.assert_allclose(args[2], np.array([[10.0, 120.0]]))
         self.assertEqual(sent_commands, [(42.0, -0.5)])
+
+    def test_publish_lidar_world_projects_robot_frame_obstacles(self) -> None:
+        publisher = FakePublisher("/lidar_world_points")
+        self.robot._lidar_world_pub = publisher
+        self.robot._obstacles_mm = np.array([[100.0, 0.0], [0.0, 100.0]], dtype=float)
+        self.robot._fused_x_mm = 10.0
+        self.robot._fused_y_mm = 20.0
+        self.robot._fused_theta = math.pi / 2.0
+
+        self.robot._publish_lidar_world()
+
+        self.assertEqual(len(publisher.published), 1)
+        msg = publisher.published[0]
+        np.testing.assert_allclose(msg.xs, [10.0, -90.0])
+        np.testing.assert_allclose(msg.ys, [120.0, 20.0])
+        self.assertEqual(msg.robot_x, 10.0)
+        self.assertEqual(msg.robot_y, 20.0)
+        self.assertEqual(msg.robot_theta, math.pi / 2.0)
 
     def test_unit_dependent_navigation_parameters_must_be_explicit(self) -> None:
         with self.assertRaises(TypeError):

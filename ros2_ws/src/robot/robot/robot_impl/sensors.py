@@ -193,6 +193,23 @@ class SensorsMixin:
                 np.concatenate([rx[:, np.newaxis], ry[:, np.newaxis]], axis=1)
             )
 
+    def _obstacles_robot_to_world_mm(
+        self,
+        obstacles_mm,
+        pose_mm: tuple[float, float, float],
+    ) -> np.ndarray:
+        """Project robot-frame obstacle points into world coordinates."""
+        obstacles = np.asarray(obstacles_mm, dtype=float)
+        if obstacles.ndim != 2 or obstacles.shape[0] == 0:
+            return np.empty((0, 2), dtype=float)
+
+        x_mm, y_mm, theta_rad = pose_mm
+        cos_t = math.cos(theta_rad)
+        sin_t = math.sin(theta_rad)
+        wx = x_mm + obstacles[:, 0] * cos_t - obstacles[:, 1] * sin_t
+        wy = y_mm + obstacles[:, 0] * sin_t + obstacles[:, 1] * cos_t
+        return np.column_stack((wx, wy))
+
     def _on_vision_detections(self, msg: VisionDetectionArray) -> None:
         detections: list[dict[str, object]] = []
         for det in msg.detections:
@@ -459,16 +476,12 @@ class SensorsMixin:
         if pub is None or obstacles is None or len(obstacles) == 0:
             return
 
-        cos_t = math.cos(ftheta)
-        sin_t = math.sin(ftheta)
-
-        wx = fx + obstacles[:, 0] * cos_t - obstacles[:, 1] * sin_t
-        wy = fy + obstacles[:, 0] * sin_t + obstacles[:, 1] * cos_t
+        world_obstacles = self._obstacles_robot_to_world_mm(obstacles, (fx, fy, ftheta))
 
         msg = LidarWorldPoints()
         msg.header.stamp = self._node.get_clock().now().to_msg()
-        msg.xs           = wx.tolist()
-        msg.ys           = wy.tolist()
+        msg.xs           = world_obstacles[:, 0].tolist()
+        msg.ys           = world_obstacles[:, 1].tolist()
         msg.robot_x      = float(fx)
         msg.robot_y      = float(fy)
         msg.robot_theta  = float(ftheta)

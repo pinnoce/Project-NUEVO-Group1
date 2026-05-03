@@ -201,7 +201,11 @@ class APFPlanner:
         attr_x = attr_scale * dx / dist_to_goal
         attr_y = attr_scale * dy / dist_to_goal
 
-        # Repulsive force — vectorised over obstacle cloud
+        # Repulsive force — vectorised over obstacle cloud.
+        #
+        # The classical inverse-distance APF gradient becomes vanishingly small
+        # when applied directly in millimetres. Use a bounded proximity falloff
+        # instead so repulsion remains meaningful at robot-scale distances.
         rep_x = 0.0
         rep_y = 0.0
         obs = np.asarray(obstacles)
@@ -212,7 +216,8 @@ class APFPlanner:
             in_range = (dists > 1e-6) & (dists < self._rep_range)
             if np.any(in_range):
                 d = dists[in_range]
-                mag = self._rep_gain * (1.0 / d - 1.0 / self._rep_range) / (d * d)
+                proximity = 1.0 - (d / self._rep_range)
+                mag = self._rep_gain * proximity * proximity
                 rep_x = float(np.sum(mag * fx[in_range] / d))
                 rep_y = float(np.sum(mag * fy[in_range] / d))
 
