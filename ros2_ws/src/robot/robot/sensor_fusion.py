@@ -84,18 +84,23 @@ class PositionComplementaryFilter(SensorFusion):
     """
     Complementary filter for GPS-anchored position fusion.
 
-    Blends GPS (ArUco tag) fixes with wheel odometry using a constant weight::
+    Each tick the estimate dead-reckons forward from the last anchor using the
+    odometry delta, then blends toward the GPS fix::
 
-        fused = odom + alpha * (gps - odom)
+        fused = (1 - alpha) * fused_prev + alpha * gps
 
-    When GPS is stale, dead-reckons from the last valid fix using the odometry
-    delta so drift only accumulates since the last GPS update. Falls back to
-    raw odometry if no GPS fix has ever been received.
+    where fused_prev is the dead-reckoned position since the last GPS update.
+    This converges to the GPS position over time rather than staying fixed at a
+    weighted average of odom and GPS.
+
+    When GPS is stale, pure dead-reckoning continues from the last anchor so
+    drift only accumulates since the last valid fix. Falls back to raw odometry
+    if no GPS fix has ever been received.
 
     Parameters
     ----------
     alpha : float, 0.0–1.0
-        GPS weight.  0 = pure odometry, 1 = snap directly to GPS each tick.
+        GPS weight per tick.  0 = ignore GPS (pure odometry), 1 = snap to GPS.
         Default 0.10.
     """
 
@@ -121,8 +126,13 @@ class PositionComplementaryFilter(SensorFusion):
         gps_y: float | None,
     ) -> tuple[float, float]:
         if gps_x is not None and gps_y is not None:
-            fused_x = odom_x + self.alpha * (gps_x - odom_x)
-            fused_y = odom_y + self.alpha * (gps_y - odom_y)
+            if self._anchor_valid:
+                prev_x = self._anchor_x_mm + (odom_x - self._odom_x_at_anchor)
+                prev_y = self._anchor_y_mm + (odom_y - self._odom_y_at_anchor)
+            else:
+                prev_x, prev_y = odom_x, odom_y
+            fused_x = prev_x + self.alpha * (gps_x - prev_x)
+            fused_y = prev_y + self.alpha * (gps_y - prev_y)
             self._anchor_x_mm      = fused_x
             self._anchor_y_mm      = fused_y
             self._odom_x_at_anchor = odom_x
