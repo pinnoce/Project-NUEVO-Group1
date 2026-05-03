@@ -52,6 +52,7 @@ from bridge_interfaces.msg import (
     SystemPower,
     SystemState,
     TagDetectionArray,
+    TrackedObstacleArray,
 )
 from bridge_interfaces.srv import SetFirmwareState
 
@@ -130,6 +131,7 @@ class BridgeNode(Node):
         )
         self.create_subscription(FusedPose,         '/fused_pose',         self._on_fused_pose,     best_effort)
         self.create_subscription(LidarWorldPoints,  '/lidar_world_points', self._on_lidar_world,    best_effort)
+        self.create_subscription(TrackedObstacleArray, '/obstacle_tracks', self._on_obstacle_tracks, best_effort)
         self.create_subscription(TagDetectionArray, '/tag_detections',     self._on_tag_detections, 10)
 
         # ROS node introspection at ~1.5 Hz
@@ -358,6 +360,21 @@ class BridgeNode(Node):
                 "robot_y":     float(msg.robot_y),
                 "robot_theta": float(msg.robot_theta),
             },
+            "ts": time.time(),
+        })
+
+    def _on_obstacle_tracks(self, msg: TrackedObstacleArray) -> None:
+        self._ws_broadcast({
+            "topic": "obstacle_tracks",
+            "data": [
+                {
+                    "id": int(track.id),
+                    "x": float(track.x),
+                    "y": float(track.y),
+                    "radius": float(track.radius),
+                }
+                for track in msg.obstacles
+            ],
             "ts": time.time(),
         })
 

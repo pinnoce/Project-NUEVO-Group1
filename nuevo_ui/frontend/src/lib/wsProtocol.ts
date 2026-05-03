@@ -364,6 +364,13 @@ export interface LidarPointsData {
   robot_theta: number // radians
 }
 
+export interface ObstacleTrackData {
+  id: number
+  x: number
+  y: number
+  radius: number
+}
+
 export interface RosNodeEntry {
   name: string
   publishers: string[]

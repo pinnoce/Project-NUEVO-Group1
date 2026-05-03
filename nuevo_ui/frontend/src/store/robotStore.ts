@@ -18,6 +18,7 @@ import type {
   KinematicsData,
   LidarPointsData,
   MagCalStatusData,
+  ObstacleTrackData,
   OdomParamData,
   RosNodeEntry,
   SensorRangeData,
@@ -255,6 +256,7 @@ function clearedRobotState(connection: ConnectionData | null, serialConnected: b
     gpsStatus: null,
     tagDetections: [],
     lidarPoints: [],
+    obstacleTracks: [],
     rosNodes: [],
   }
 }
@@ -300,6 +302,7 @@ interface RobotState {
   gpsStatus: GpsStatusData | null
   tagDetections: TagDetectionEntry[]  // all currently visible tags (clears when none detected)
   lidarPoints: LidarPointsData[]   // rolling window — newest last
+  obstacleTracks: ObstacleTrackData[]
   rosNodes: RosNodeEntry[]
   dispatch: (topic: string, data: any, ts?: number) => void
   setMotorRecording: (motorIdx: number, active: boolean) => void
@@ -341,6 +344,7 @@ export const useRobotStore = create<RobotState>((set) => ({
   gpsStatus: null,
   tagDetections: [],
   lidarPoints: [],
+  obstacleTracks: [],
   rosNodes: [],
 
   clearErrorLog: () => set({ errorLog: [] }),
@@ -745,6 +749,9 @@ export const useRobotStore = create<RobotState>((set) => ({
         }))
         break
       }
+
+      case 'obstacle_tracks':
+        set({ obstacleTracks: data as ObstacleTrackData[] })
         break
 
       case 'ros_nodes':

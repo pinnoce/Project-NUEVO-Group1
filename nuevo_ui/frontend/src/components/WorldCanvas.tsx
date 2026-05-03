@@ -46,6 +46,7 @@ export function WorldCanvas() {
   const gpsStatus     = useRobotStore((s) => s.gpsStatus)
   const tagDetections = useRobotStore((s) => s.tagDetections)
   const lidarPoints = useRobotStore((s) => s.lidarPoints)
+  const obstacleTracks = useRobotStore((s) => s.obstacleTracks)
 
   const [trails, setTrails] = useState<Trails>({ odom: true, gps: true, fused: true, lidar: true })
 
@@ -75,6 +76,10 @@ export function WorldCanvas() {
       for (const frame of lidarPoints)
         for (let i = 0; i < frame.xs.length; i++)
           allPts.push([frame.xs[i], frame.ys[i]])
+      for (const track of obstacleTracks) {
+        allPts.push([track.x - track.radius, track.y - track.radius])
+        allPts.push([track.x + track.radius, track.y + track.radius])
+      }
     }
 
     // Start from venue bounds; expand only if data falls outside.
@@ -206,6 +211,23 @@ export function WorldCanvas() {
       }
     }
 
+    if (trails.lidar && obstacleTracks.length > 0) {
+      ctx.strokeStyle = 'rgba(248,113,113,0.95)'
+      ctx.fillStyle = 'rgba(248,113,113,0.95)'
+      ctx.lineWidth = 1.5
+      ctx.font = '10px monospace'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      for (const track of obstacleTracks) {
+        const [cx, cy] = toC(track.x, track.y)
+        const radiusPx = Math.max(2, track.radius * scale)
+        ctx.beginPath()
+        ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.fillText(`#${track.id}`, cx + radiusPx + 3, cy - 2)
+      }
+    }
+
     const drawRobot = (
       x: number,
       y: number,
@@ -259,7 +281,7 @@ export function WorldCanvas() {
         'rgba(96,165,250,0.25)',
       )
     }
-  }, [fusedPose, fusedTrail, kinematics, odomTrail, gpsStatus, tagDetections, lidarPoints, trails])
+  }, [fusedPose, fusedTrail, kinematics, odomTrail, gpsStatus, tagDetections, lidarPoints, obstacleTracks, trails])
 
   return (
     <div className="relative rounded-2xl p-4 backdrop-blur-2xl bg-white/10 border border-white/20 shadow-xl">
