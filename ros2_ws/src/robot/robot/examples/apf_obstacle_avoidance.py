@@ -28,6 +28,7 @@ WHAT THIS TEACHES
 from __future__ import annotations
 
 import time
+import math
 
 from robot.hardware_map import (
     Button,
@@ -72,11 +73,11 @@ WAYPOINTS_MM = [
 ]
 
 VELOCITY_MM_S = 150.0
-LOOKAHEAD_MM = 250.0
+_APF_API_LOOKAHEAD_MM = 50.0  # current APF wrapper still accepts this, but the planner does not use it
 TOLERANCE_MM = 50.0
-MAX_ANGULAR_RAD_S = 1.2
-REPULSION_RANGE_MM = 400.0
-REPULSION_GAIN = 800.0
+MAX_ANGULAR_RAD_S = 1.0
+REPULSION_RANGE_MM = 550.0
+REPULSION_GAIN = 1200.0
 
 STATUS_PRINT_INTERVAL_S = 0.5
 
@@ -152,16 +153,32 @@ def print_status(robot: Robot) -> None:
     else:
         x, y, theta = robot.get_odometry_pose()
         label = "odom "
-    obstacle_count = len(robot.get_obstacles())
+    raw_obstacle_count = len(robot.get_obstacles())
+    obstacle_tracks = robot.get_obstacle_tracks()
+    tracked_count = len(obstacle_tracks)
+    if obstacle_tracks:
+        nearest_boundary_mm = min(
+            max(
+                0.0,
+                math.hypot(float(track["x"]) - x, float(track["y"]) - y) - float(track["radius"]),
+            )
+            for track in obstacle_tracks
+        )
+        track_summary = f" tracked={tracked_count} nearest_track={nearest_boundary_mm:.0f} mm"
+    else:
+        track_summary = f" tracked={tracked_count}"
     freshness = f" gps_fresh={robot.is_gps_active()}" if ENABLE_GPS and label == "fused" else ""
-    print(f"  {label}=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°  obstacles={obstacle_count}{freshness}")
+    print(
+        f"  {label}=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°"
+        f"  raw_obstacles={raw_obstacle_count}{track_summary}{freshness}"
+    )
 
 
 def start_path(robot: Robot):
     return robot.apf_follow_path(
         WAYPOINTS_MM,
         velocity=VELOCITY_MM_S,
-        lookahead=LOOKAHEAD_MM,
+        lookahead=_APF_API_LOOKAHEAD_MM,
         tolerance=TOLERANCE_MM,
         repulsion_range=REPULSION_RANGE_MM,
         max_angular_rad_s=MAX_ANGULAR_RAD_S,
@@ -190,14 +207,19 @@ def run(robot: Robot) -> None:
             print("[FSM] IDLE — press BTN_1 to start APF path, BTN_2 to cancel")
             print(f"[CFG] waypoints={WAYPOINTS_MM}")
             print(
-                f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s lookahead={LOOKAHEAD_MM:.0f} mm "
-                f"repulsion_range={REPULSION_RANGE_MM:.0f} mm gain={REPULSION_GAIN:.0f}"
+                f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s tolerance={TOLERANCE_MM:.0f} mm "
+                f"repulsion_range={REPULSION_RANGE_MM:.0f} mm gain={REPULSION_GAIN:.0f} "
+                f"max_angular={MAX_ANGULAR_RAD_S:.1f} rad/s"
             )
             if ENABLE_LIDAR:
                 print(
                     f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
                     f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_RANGE_MIN_MM:.0f}-"
                     f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
+                )
+                print(
+                    f"[CFG] tracker ttl={robot.OBSTACLE_TRACK_TTL_S:.1f}s max_tracks={robot.OBSTACLE_TRACK_MAX_TRACKS} "
+                    f"planner_tracks={robot.APF_MAX_PLANNER_TRACKS} max_disk_radius={robot.OBSTACLE_TRACK_MAX_DISK_RADIUS_MM:.0f} mm"
                 )
             if ENABLE_GPS:
                 print(

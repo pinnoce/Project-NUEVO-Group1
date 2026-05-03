@@ -179,10 +179,10 @@ class Robot(HardwareMixin, SensorsMixin, NavigationMixin, LegacyMixin):
     OBSTACLE_TRACK_MAX_DISK_RADIUS_MM: float = 75.0
     OBSTACLE_TRACK_RADIUS_MARGIN_MM: float = 20.0
     OBSTACLE_TRACK_ASSOCIATION_DIST_MM: float = 180.0
-    OBSTACLE_TRACK_TTL_S: float = 1.0
+    OBSTACLE_TRACK_TTL_S: float = 1.5
     OBSTACLE_TRACK_MIN_HITS_TO_CONFIRM: int = 2
     OBSTACLE_TRACK_MAX_TRACKS: int = 12
-    APF_MAX_PLANNER_TRACKS: int = 4
+    APF_MAX_PLANNER_TRACKS: int = 6
     APF_TRACK_INPUT_MARGIN_MM: float = 150.0
 
     _SERVO_MIN_US: int = 1000

@@ -392,10 +392,12 @@ the robot from decelerating at every intermediate waypoint.
 
 #### `apf_follow_path(waypoints, velocity, lookahead, tolerance, repulsion_range, blocking=True, max_angular_rad_s=1.0, repulsion_gain=500.0, timeout=None, *, advance_radius=None) → MotionHandle`
 Same as `purepursuit_follow_path` plus obstacle avoidance via artificial
-potential fields. Obstacle data comes from `set_obstacles()` and/or
-`set_obstacle_provider()`.
+potential fields. The current APF runtime uses tracked world-frame obstacle
+disks derived from lidar, not the raw point cloud.
 
 Additional parameters:
+- `lookahead` — currently retained only for API compatibility; the current APF
+  planner does not use it
 - `repulsion_range` — obstacle influence radius in current unit
 - `repulsion_gain` — repulsion force scale (default 500.0; increase to push
   harder away from obstacles)
@@ -421,6 +423,17 @@ Clears the obstacle list.
 #### `get_obstacles() → list[tuple[float, float]]`
 Returns the cached obstacles in the current unit. When `enable_lidar()` is
 active, this reflects the latest filtered lidar scan in robot body frame.
+
+#### `get_obstacle_tracks(include_unconfirmed=False) → list[dict]`
+Returns tracked obstacle disks in world frame. Each entry includes:
+- `id`
+- `x`
+- `y`
+- `radius`
+- `hits`
+
+These are the obstacle tracks currently used by APF when lidar-based obstacle
+avoidance is active.
 
 #### `set_obstacle_provider(provider: Callable | None) → None`
 Install a live callback that returns robot-frame obstacle positions in **mm**
