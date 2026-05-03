@@ -578,7 +578,7 @@ class NavigationMixin:
         tol_rad    = math.radians(tolerance_deg)
 
         def target():
-            self._turn_to_heading(target_rad, tol_rad)
+            self._turn_to_heading(target_rad, tol_rad, max_angular_rad=1.0)
 
         return self._start_nav(target, blocking, timeout)
 
