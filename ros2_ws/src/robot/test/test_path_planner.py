@@ -126,6 +126,23 @@ class APFPlannerTests(unittest.TestCase):
         self.assertLessEqual(linear, 1e-6)
         self.assertGreater(abs(angular), 0.0)
 
+    def test_centered_disk_obstacle_ahead_creates_escape_turn(self) -> None:
+        planner = APFPlanner(
+            max_linear=200.0, max_angular=2.0,
+            attraction_gain=1.0, repulsion_gain=1200.0,
+            repulsion_range=650.0, goal_tolerance=20.0, heading_gain=2.0,
+        )
+        obstacle_disks = np.array([[0.0, 600.0, 75.0]])
+
+        linear, angular = planner.navigate_to_goal(
+            (0.0, 0.0, np.pi / 2.0),
+            (0.0, 1000.0),
+            obstacle_disks,
+        )
+
+        self.assertGreater(linear, 0.0)
+        self.assertLess(angular, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

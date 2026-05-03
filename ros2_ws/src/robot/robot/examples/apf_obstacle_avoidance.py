@@ -68,15 +68,15 @@ RIGHT_WHEEL_MOTOR = Motor.DC_M2
 RIGHT_WHEEL_DIR_INVERTED = True
 
 WAYPOINTS_MM = [
-    (1000.0, 0.0),
-    (2000.0, 0.0),
+    (0.0, 1000.0),
+    (0.0, 2000.0),
 ]
 
 VELOCITY_MM_S = 150.0
 _APF_API_LOOKAHEAD_MM = 50.0  # current APF wrapper still accepts this, but the planner does not use it
 TOLERANCE_MM = 50.0
 MAX_ANGULAR_RAD_S = 1.0
-REPULSION_RANGE_MM = 550.0
+REPULSION_RANGE_MM = 650.0
 REPULSION_GAIN = 1200.0
 
 STATUS_PRINT_INTERVAL_S = 0.5

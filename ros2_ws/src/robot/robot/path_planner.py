@@ -209,6 +209,9 @@ class APFPlanner:
         # instead so repulsion remains meaningful at robot-scale distances.
         rep_x = 0.0
         rep_y = 0.0
+        tan_x = 0.0
+        tan_y = 0.0
+        obstacle_scale = 1.0
         obs = np.asarray(obstacles)
         if obs.ndim == 2 and obs.shape[0] > 0:
             centers = obs[:, :2]
@@ -225,8 +228,29 @@ class APFPlanner:
                 rep_x = float(np.sum(mag * fx[in_range] / center_dists[in_range]))
                 rep_y = float(np.sum(mag * fy[in_range] / center_dists[in_range]))
 
-        force_x = attr_x + rep_x
-        force_y = attr_y + rep_y
+                # Add a tangential escape component around each obstacle.
+                # This breaks the head-on APF local minimum where a centered
+                # obstacle only produces a backward force and the robot stalls.
+                ux = fx[in_range] / center_dists[in_range]
+                uy = fy[in_range] / center_dists[in_range]
+                left_tx = -uy
+                left_ty = ux
+                right_tx = uy
+                right_ty = -ux
+                goal_ux = dx / dist_to_goal
+                goal_uy = dy / dist_to_goal
+                choose_left = (left_tx * goal_ux + left_ty * goal_uy) >= (right_tx * goal_ux + right_ty * goal_uy)
+                tangent_x = np.where(choose_left, left_tx, right_tx)
+                tangent_y = np.where(choose_left, left_ty, right_ty)
+                tangent_mag = 0.75 * self._rep_gain * proximity * proximity
+                tan_x = float(np.sum(tangent_mag * tangent_x))
+                tan_y = float(np.sum(tangent_mag * tangent_y))
+
+                nearest_boundary = float(np.min(boundary_dists[in_range]))
+                obstacle_scale = max(0.15, min(1.0, nearest_boundary / self._rep_range))
+
+        force_x = attr_x + rep_x + tan_x
+        force_y = attr_y + rep_y + tan_y
         if math.hypot(force_x, force_y) < 1e-6:
             return 0.0, 0.0
 
@@ -235,7 +259,7 @@ class APFPlanner:
 
         forward_scale = max(0.0, math.cos(ang_err))
         goal_scale    = min(1.0, dist_to_goal / max(2.0 * self.goal_tolerance, 1.0))
-        linear  = self._max_linear * forward_scale * goal_scale
+        linear  = self._max_linear * forward_scale * goal_scale * obstacle_scale
 
         angular = self._heading_gain * ang_err
         angular = max(-self._max_angular, min(self._max_angular, angular))
