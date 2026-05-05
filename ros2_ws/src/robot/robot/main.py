@@ -69,12 +69,12 @@ def run(robot: Robot) -> None:
             start_robot(robot)
             print("[FSM] INIT (odometry reset)")
             path_control_points = [
-                #(0.0, 3350.0),
+                #(0.0, 3350.0), # starting from cross (straight then turn on to ramp lane)
                 #(-20.0, 3400.0),
                 #(300.0, 3400.0),
                 #(350.0, 3450.0),
                 #(350.0, 600.0),
-                
+
                 (300.0, 0.0), # starting from left lane
                 (300.0, 2500.0),
                 (1300.0, 2500.0),
