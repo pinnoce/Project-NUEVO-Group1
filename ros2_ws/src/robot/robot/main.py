@@ -1,33 +1,3 @@
-"""
-traffic_light_leds.py - vision-triggered LED control
-====================================================
-This example reads traffic-light detections from the vision node and uses the
-Robot API to light the matching onboard LED.
-
-HOW TO RUN
-----------
-Start the vision node in another terminal:
-
-    ros2 run vision vision_node
-
-Then copy this file over main.py and restart the robot node:
-
-    cp examples/traffic_light_leds.py main.py
-    ros2 run robot robot
-
-WHAT THE ROBOT DOES
--------------------
-If a red traffic light is detected, the red LED turns on.
-If a green traffic light is detected, the green LED turns on.
-If no new red/green traffic light is seen for 2 seconds, all LEDs turn off.
-
-WHAT THIS TEACHES
------------------
-1. Reading vision results through the Robot API
-2. Finding a specific detected class and reading its attributes
-3. Holding an output for a short time without blocking the FSM loop
-"""
-
 from __future__ import annotations
 
 import time
