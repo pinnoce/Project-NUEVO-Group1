@@ -41,26 +41,40 @@ PickupTarget = ScriptedTarget
 # Replace these placeholder timing values with your measured course values.
 # Each target segment should end with the rover at the target location.
 # Because this is navigation-only, no claw action happens after each segment.
+#
+# Default mission order is patty first, bottom bun second, top bun third.
+# That means GO_TO_PATTY_LOCATION should be tuned from the start pose,
+# GO_TO_BOTTOM_BUN_LOCATION should be tuned from the patty location, and
+# GO_TO_TOP_BUN_LOCATION should be tuned from the bottom bun location.
 
 SCRIPTED_PATHS: dict[str, list[MotionStep]] = {
     "TEST_FORWARD": [
         MotionStep(2.0, 120.0, 0.0, "drive forward"),
     ],
-    "GO_TO_BOTTOM_BUN_LOCATION": [
-        MotionStep(1.2, 120.0, 0.0, "leave start"),
-        MotionStep(0.7, 0.0, 35.0, "turn toward bottom bun location"),
-        MotionStep(1.0, 90.0, 0.0, "drive to bottom bun location"),
-    ],
+
+    # Start pose -> patty location.
+    # Tune these times first since the patty is now the first target.
     "GO_TO_PATTY_LOCATION": [
-        MotionStep(0.8, -80.0, 0.0, "back away from bottom bun location"),
-        MotionStep(0.9, 0.0, -40.0, "turn toward patty location"),
-        MotionStep(1.2, 100.0, 0.0, "drive to patty location"),
+        MotionStep(1.2, 120.0, 0.0, "leave start toward patty location"),
+        MotionStep(0.7, 0.0, 35.0, "turn toward patty location"),
+        MotionStep(1.0, 90.0, 0.0, "drive to patty location"),
     ],
-    "GO_TO_TOP_BUN_LOCATION": [
+
+    # Patty location -> bottom bun location.
+    "GO_TO_BOTTOM_BUN_LOCATION": [
         MotionStep(0.8, -80.0, 0.0, "back away from patty location"),
+        MotionStep(0.9, 0.0, -40.0, "turn toward bottom bun location"),
+        MotionStep(1.2, 100.0, 0.0, "drive to bottom bun location"),
+    ],
+
+    # Bottom bun location -> top bun location.
+    "GO_TO_TOP_BUN_LOCATION": [
+        MotionStep(0.8, -80.0, 0.0, "back away from bottom bun location"),
         MotionStep(0.8, 0.0, 40.0, "turn toward top bun location"),
         MotionStep(1.2, 100.0, 0.0, "drive to top bun location"),
     ],
+
+    # Top bun location -> dropoff location.
     "GO_TO_DROPOFF_LOCATION": [
         MotionStep(0.8, -80.0, 0.0, "back away after top bun location"),
         MotionStep(1.0, 0.0, -45.0, "turn toward dropoff location"),
@@ -69,8 +83,8 @@ SCRIPTED_PATHS: dict[str, list[MotionStep]] = {
 }
 
 SCRIPTED_TARGET_SEQUENCE: list[ScriptedTarget] = [
-    ScriptedTarget("bottom_bun_location", "GO_TO_BOTTOM_BUN_LOCATION"),
     ScriptedTarget("patty_location", "GO_TO_PATTY_LOCATION"),
+    ScriptedTarget("bottom_bun_location", "GO_TO_BOTTOM_BUN_LOCATION"),
     ScriptedTarget("top_bun_location", "GO_TO_TOP_BUN_LOCATION"),
 ]
 
@@ -158,7 +172,7 @@ def drive_scripted_motion(robot: Robot, segment_name: str) -> bool:
 
 
 class ScriptedNavigationMission:
-    """Non-blocking mission: visit 3 scripted target locations, then dropoff."""
+    """Non-blocking mission: visit patty first, then 2 bun locations, then dropoff."""
 
     def __init__(self, targets: list[ScriptedTarget] | None = None) -> None:
         self.targets = targets if targets is not None else SCRIPTED_TARGET_SEQUENCE
