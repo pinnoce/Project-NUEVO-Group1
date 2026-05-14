@@ -23,12 +23,15 @@ from robot.robot import FirmwareState, Robot
 from robot.gps_navigation import drive_to_world_point_gps
 
 
-# Replace this with your actual rover ArUco marker ID.
+# ---------------------------------------------------------------------------
+# Change these for your actual course/test
+# ---------------------------------------------------------------------------
+
+# Replace this with the ArUco marker ID mounted on your rover.
 TAG_ID = 19
 
-# Test target in world-frame coordinates.
+# Pick a safe nearby world-frame test target.
 # Units: mm.
-# Replace these with a small reachable test point on your course.
 TEST_TARGET_X_MM = 500.0
 TEST_TARGET_Y_MM = 300.0
 
@@ -53,7 +56,7 @@ def configure_robot(robot: Robot) -> None:
         TAG_BODY_OFFSET_Y_MM,
     )
 
-    print(f"[TEST GPS] Tracking ArUco tag ID: {TAG_ID}")
+    print(f"[TEST GPS] tracking ArUco tag ID: {TAG_ID}")
 
 
 def start_robot(robot: Robot) -> None:
@@ -94,11 +97,11 @@ def run(robot: Robot) -> None:
     start_robot(robot)
 
     print(
-        f"[TEST GPS] Driving to target "
+        f"[TEST GPS] driving to target "
         f"({TEST_TARGET_X_MM:.0f}, {TEST_TARGET_Y_MM:.0f}) mm"
     )
-    print("[TEST GPS] Waiting for valid ArUco/GPS pose.")
-    print("[TEST GPS] Press Ctrl+C to stop early.")
+    print("[TEST GPS] waiting for valid ArUco/GPS pose")
+    print("[TEST GPS] press Ctrl+C to stop early")
 
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
@@ -119,7 +122,7 @@ def run(robot: Robot) -> None:
 
         if reached:
             robot.stop()
-            print("[TEST GPS] Target reached.")
+            print("[TEST GPS] target reached")
             break
 
         next_tick += period
@@ -141,14 +144,14 @@ def main(args=None) -> None:
         run(robot)
 
     except KeyboardInterrupt:
-        print("[TEST GPS] Interrupted. Stopping robot.")
+        print("[TEST GPS] interrupted; stopping robot")
 
     finally:
         try:
             robot.stop()
             robot.shutdown()
         except Exception as exc:
-            print(f"[TEST GPS] Shutdown error: {exc}")
+            print(f"[TEST GPS] shutdown error: {exc}")
 
         node.destroy_node()
 
