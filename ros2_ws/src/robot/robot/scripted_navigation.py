@@ -1,133 +1,103 @@
-from __future__ import annotations
-
 import time
 from dataclasses import dataclass
 
 from robot.robot import Robot
 
-# =============================================================================
-# Scripted navigation-only helpers
-# =============================================================================
-# This file is intentionally isolated from main.py and from gps_navigation.py.
-#
-# Behavior:
-#   - Run scripted motion segments to visit 3 configured target locations.
-#   - Run the configured drop-off motion segment.
-#   - Do NOT enable servos, move the claw, close the claw, lift, or release.
-# =============================================================================
 
-
-@dataclass(frozen=True)
+@dataclass
 class MotionStep:
     duration_s: float
     linear_mm_s: float
     angular_deg_s: float
-    label: str = ""
 
 
-@dataclass(frozen=True)
-class ScriptedTarget:
-    name: str
-    approach_segment: str
-
-
-# Backward-compatible alias in case older test code imports PickupTarget.
-PickupTarget = ScriptedTarget
-
-
-# -----------------------------------------------------------------------------
-# Course-specific scripted paths
-# -----------------------------------------------------------------------------
-# Replace these placeholder timing values with your measured course values.
-# Each target segment should end with the rover at the target location.
-# Because this is navigation-only, no claw action happens after each segment.
+# ---------------------------------------------------------------------------
+# Scripted paths
+# ---------------------------------------------------------------------------
+# Scripted navigation does NOT know world coordinates.
+# It just runs timed motion commands.
 #
-# Default mission order is patty first, bottom bun second, top bun third.
-# That means GO_TO_PATTY_LOCATION should be tuned from the start pose,
-# GO_TO_BOTTOM_BUN_LOCATION should be tuned from the patty location, and
-# GO_TO_TOP_BUN_LOCATION should be tuned from the bottom bun location.
+# Positive linear_mm_s = forward
+# Negative linear_mm_s = backward
+#
+# Positive angular_deg_s = turn left / CCW
+# Negative angular_deg_s = turn right / CW
+#
+# To tune the course:
+#   1. Increase duration_s to go farther / turn longer.
+#   2. Decrease duration_s to go shorter / turn less.
+#   3. Increase linear_mm_s to drive faster.
+#   4. Increase angular_deg_s magnitude to turn faster.
+#
+# The sequence below is only a starting template.
+# You MUST tune these numbers on your actual course.
+
 
 SCRIPTED_PATHS: dict[str, list[MotionStep]] = {
     "TEST_FORWARD": [
-        MotionStep(2.0, 120.0, 0.0, "drive forward"),
+        MotionStep(duration_s=2.0, linear_mm_s=150.0, angular_deg_s=0.0),
     ],
 
-    # Start pose -> patty location.
-    # Tune these times first since the patty is now the first target.
-    "GO_TO_PATTY_LOCATION": [
-        MotionStep(1.2, 120.0, 0.0, "leave start toward patty location"),
-        MotionStep(0.7, 0.0, 35.0, "turn toward patty location"),
-        MotionStep(1.0, 90.0, 0.0, "drive to patty location"),
-    ],
+    # Full no-pickup route:
+    # Goes to the patty first, then bottom bun, then top bun, then dropoff.
+    #
+    # Replace these motions with your measured/tested sequence.
+    "BURGER_NO_PICKUP": [
+        # Go to patty first.
+        MotionStep(duration_s=2.0, linear_mm_s=150.0, angular_deg_s=0.0),
+        MotionStep(duration_s=0.7, linear_mm_s=0.0, angular_deg_s=45.0),
+        MotionStep(duration_s=1.0, linear_mm_s=120.0, angular_deg_s=0.0),
 
-    # Patty location -> bottom bun location.
-    "GO_TO_BOTTOM_BUN_LOCATION": [
-        MotionStep(0.8, -80.0, 0.0, "back away from patty location"),
-        MotionStep(0.9, 0.0, -40.0, "turn toward bottom bun location"),
-        MotionStep(1.2, 100.0, 0.0, "drive to bottom bun location"),
-    ],
+        # Pause near patty.
+        MotionStep(duration_s=0.5, linear_mm_s=0.0, angular_deg_s=0.0),
 
-    # Bottom bun location -> top bun location.
-    "GO_TO_TOP_BUN_LOCATION": [
-        MotionStep(0.8, -80.0, 0.0, "back away from bottom bun location"),
-        MotionStep(0.8, 0.0, 40.0, "turn toward top bun location"),
-        MotionStep(1.2, 100.0, 0.0, "drive to top bun location"),
-    ],
+        # Go to bottom bun.
+        MotionStep(duration_s=0.7, linear_mm_s=0.0, angular_deg_s=-45.0),
+        MotionStep(duration_s=1.5, linear_mm_s=120.0, angular_deg_s=0.0),
 
-    # Top bun location -> dropoff location.
-    "GO_TO_DROPOFF_LOCATION": [
-        MotionStep(0.8, -80.0, 0.0, "back away after top bun location"),
-        MotionStep(1.0, 0.0, -45.0, "turn toward dropoff location"),
-        MotionStep(2.0, 120.0, 0.0, "drive to dropoff location"),
+        # Pause near bottom bun.
+        MotionStep(duration_s=0.5, linear_mm_s=0.0, angular_deg_s=0.0),
+
+        # Go to top bun.
+        MotionStep(duration_s=1.0, linear_mm_s=0.0, angular_deg_s=45.0),
+        MotionStep(duration_s=1.5, linear_mm_s=120.0, angular_deg_s=0.0),
+
+        # Pause near top bun.
+        MotionStep(duration_s=0.5, linear_mm_s=0.0, angular_deg_s=0.0),
+
+        # Go to dropoff.
+        MotionStep(duration_s=0.8, linear_mm_s=0.0, angular_deg_s=-45.0),
+        MotionStep(duration_s=2.0, linear_mm_s=150.0, angular_deg_s=0.0),
     ],
 }
 
-SCRIPTED_TARGET_SEQUENCE: list[ScriptedTarget] = [
-    ScriptedTarget("patty_location", "GO_TO_PATTY_LOCATION"),
-    ScriptedTarget("bottom_bun_location", "GO_TO_BOTTOM_BUN_LOCATION"),
-    ScriptedTarget("top_bun_location", "GO_TO_TOP_BUN_LOCATION"),
-]
-
-# Backward-compatible alias in case older test code imports SCRIPTED_OBJECT_SEQUENCE.
-SCRIPTED_OBJECT_SEQUENCE = SCRIPTED_TARGET_SEQUENCE
-
-# -----------------------------------------------------------------------------
-# Internal state for non-blocking scripted motion.
 
 _script_name: str | None = None
 _script_step_index: int = 0
 _script_step_started_at: float = 0.0
 
 
-# =============================================================================
-# Basic helpers
-# =============================================================================
-
-
 def reset_scripted_motion() -> None:
-    global _script_name, _script_step_index, _script_step_started_at
+    global _script_name
+    global _script_step_index
+    global _script_step_started_at
+
     _script_name = None
     _script_step_index = 0
     _script_step_started_at = 0.0
 
 
-def reset_all_scripted_state() -> None:
-    reset_scripted_motion()
-
-
-# =============================================================================
-# Non-blocking motion functions
-# =============================================================================
-
-
 def drive_scripted_motion(robot: Robot, segment_name: str) -> bool:
     """
-    Run one dead-reckoned motion segment without blocking the caller.
+    Run one scripted motion sequence.
 
-    Returns True once the segment is complete. Call this repeatedly from a loop
-    running at DEFAULT_FSM_HZ. The function owns its own simple state machine.
+    Returns:
+        True when the full sequence is done.
+        False while the sequence is still running.
     """
-    global _script_name, _script_step_index, _script_step_started_at
+    global _script_name
+    global _script_step_index
+    global _script_step_started_at
 
     if segment_name not in SCRIPTED_PATHS:
         robot.stop()
@@ -162,54 +132,14 @@ def drive_scripted_motion(robot: Robot, segment_name: str) -> bool:
 
         current_step = steps[_script_step_index]
 
-    robot.set_velocity(current_step.linear_mm_s, current_step.angular_deg_s)
+        print(
+            f"[SCRIPTED NAV] {segment_name}: "
+            f"step {_script_step_index + 1}/{len(steps)}"
+        )
+
+    robot.set_velocity(
+        current_step.linear_mm_s,
+        current_step.angular_deg_s,
+    )
+
     return False
-
-
-# =============================================================================
-# Scripted 3-target navigation-only mission state machine
-# =============================================================================
-
-
-class ScriptedNavigationMission:
-    """Non-blocking mission: visit patty first, then 2 bun locations, then dropoff."""
-
-    def __init__(self, targets: list[ScriptedTarget] | None = None) -> None:
-        self.targets = targets if targets is not None else SCRIPTED_TARGET_SEQUENCE
-        self.index = 0
-        self.phase = "NAV_TO_TARGET"
-        self.done = False
-
-    def reset(self) -> None:
-        self.index = 0
-        self.phase = "NAV_TO_TARGET"
-        self.done = False
-        reset_all_scripted_state()
-
-    def update(self, robot: Robot) -> bool:
-        if self.done:
-            robot.stop()
-            return True
-
-        if self.phase == "NAV_TO_TARGET":
-            target = self.targets[self.index]
-            if drive_scripted_motion(robot, target.approach_segment):
-                print(f"[SCRIPTED MISSION] visited {target.name}; no pickup command sent")
-                self.index += 1
-                self.phase = "NAV_TO_DROPOFF" if self.index >= len(self.targets) else "NAV_TO_TARGET"
-            return False
-
-        if self.phase == "NAV_TO_DROPOFF":
-            if drive_scripted_motion(robot, "GO_TO_DROPOFF_LOCATION"):
-                robot.stop()
-                self.done = True
-                print("[SCRIPTED MISSION] navigation-only mission complete; no dropoff command sent")
-                return True
-            return False
-
-        robot.stop()
-        raise RuntimeError(f"Unknown scripted mission phase: {self.phase}")
-
-
-# Backward-compatible alias in case an older test imports ScriptedPickupMission.
-ScriptedPickupMission = ScriptedNavigationMission
