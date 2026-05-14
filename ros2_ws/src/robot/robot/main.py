@@ -1,3 +1,14 @@
+"""
+pure_pursuit.py — FSM-based pure-pursuit path following
+=======================================================
+Copy this file over main.py, then restart the robot node:
+
+    cp examples/pure_pursuit.py main.py
+    ros2 run robot robot
+
+BTN_1 starts the path. BTN_2 cancels and returns to IDLE.
+"""
+
 from __future__ import annotations
 
 import time
@@ -24,36 +35,70 @@ from robot.hardware_map import (
     WHEEL_DIAMETER,
 )
 from robot.robot import FirmwareState, Robot
+from robot.util import densify_polyline  # noqa: F401 - optional helper for students
 
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Sensor toggles — set True if the corresponding node is running
+# Hardware calibration (wheel geometry, lidar mount, tag offset) lives in
+# robot/hardware_map.py.
 # ---------------------------------------------------------------------------
 
 ENABLE_LIDAR = False
-ENABLE_GPS = False
-TAG_ID = 19
+ENABLE_GPS   = False
 
-TURN_DEGREES = 90.0
-FORWARD_DISTANCE_MM = 500.0
-DRIVE_VELOCITY_MM_S = 200.0
-DRIVE_TOLERANCE_MM = 20.0
-TURN_TOLERANCE_DEG = 3.0
-
-LED_BRIGHTNESS = 255
-LIGHT_HOLD_SEC = 2.0
-VISION_STALE_SEC = 3.0
-MIN_TRAFFIC_LIGHT_CONFIDENCE = 0.50
-GREEN_HOLD_SEC = 10.0  # keep driving this many seconds after last green detection
+TAG_ID = 19  # IMPORTANT: set to the ArUco marker ID on your robot
 
 
 # ---------------------------------------------------------------------------
-# Main Helpers
+# GPS tuning (only used when ENABLE_GPS = True)
+#
+# GPS_POSITION_ALPHA     — how strongly each GPS fix pulls the fused position.
+#                          0.05 = smooth/slow, 0.10 = default, 0.30 = aggressive
+#
+# ENABLE_GPS_TANGENT_HEADING — derive heading from GPS trajectory direction.
+#                          False = pure odometry heading (default).
+#
+# GPS_TANGENT_ALPHA      — how strongly GPS tangent corrects odometry heading.
+#                          0.05 = gentle, 0.15 = default, 0.30 = aggressive
+#
+# GPS_TANGENT_MIN_DISPLACEMENT_MM — travel required before accepting a new
+#                          heading sample. 100 = responsive, 200 = default,
+#                          400 = noise-robust (for jittery GPS)
+#
+# To tune: watch θ_odom vs θ_fused in the status output while running.
 # ---------------------------------------------------------------------------
+
+GPS_POSITION_ALPHA           = 0.20
+ENABLE_GPS_TANGENT_HEADING   = True
+GPS_TANGENT_ALPHA            = 0.15
+GPS_TANGENT_MIN_DISPLACEMENT_MM = 150.0
+
+
+# ---------------------------------------------------------------------------
+# Pure pursuit configuration
+# ---------------------------------------------------------------------------
+
+PATH_CONTROL_POINTS = [
+    (0.0, 3350.0), # starting from cross (straight then turn on to ramp lane)
+    (400.0, 3450.0),
+    (410.0, 500.0),
+]
+
+# Optional: densify long segments for smoother tracking.
+PATH_CONTROL_POINTS = densify_polyline(PATH_CONTROL_POINTS, spacing=50.0)
+
+VELOCITY_MM_S      = 150.0
+LOOKAHEAD_MM       = 120.0
+TOLERANCE_MM       = 25.0
+ADVANCE_RADIUS_MM  = 80.0
+MAX_ANGULAR_RAD_S  = 1.0
+
+STATUS_PRINT_INTERVAL_S = 0.5
+
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
-    robot.enable_vision()
     robot.set_odometry_parameters(
         wheel_diameter=WHEEL_DIAMETER,
         wheel_base=WHEEL_BASE,
@@ -63,6 +108,7 @@ def configure_robot(robot: Robot) -> None:
         right_motor_id=RIGHT_WHEEL_MOTOR,
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
+
     if ENABLE_LIDAR:
         robot.enable_lidar()
         robot.set_lidar_mount(
@@ -82,7 +128,13 @@ def configure_robot(robot: Robot) -> None:
         robot.enable_gps()
         robot.set_tracked_tag_id(TAG_ID)
         robot.set_tag_body_offset(TAG_BODY_OFFSET_X_MM, TAG_BODY_OFFSET_Y_MM)
+        robot.set_position_fusion_alpha(GPS_POSITION_ALPHA)
         print(f"[sensor] GPS enabled — tracking ArUco tag {TAG_ID}")
+        if ENABLE_GPS_TANGENT_HEADING:
+            robot.enable_gps_tangent_heading(
+                alpha=GPS_TANGENT_ALPHA,
+                min_displacement_mm=GPS_TANGENT_MIN_DISPLACEMENT_MM,
+            )
 
 
 def start_robot(robot: Robot) -> None:
@@ -91,138 +143,125 @@ def start_robot(robot: Robot) -> None:
         robot.reset_estop()
     robot.set_state(FirmwareState.RUNNING)
 
-# ---------------------------------------------------------------------------
-# Specific Helpers
-# ---------------------------------------------------------------------------
 
-def dim_all_leds(robot: Robot) -> None:
-    for led in (LED.RED, LED.GREEN, LED.BLUE, LED.ORANGE, LED.PURPLE):
-        robot.set_led(led, 0)
+def reset_mission_pose(robot: Robot) -> None:
+    robot.reset_odometry()
+    if not robot.wait_for_odometry_reset(timeout=2.0):
+        print("[warn] odometry reset not confirmed within 2.0s; continuing with latest pose")
+        robot.wait_for_pose_update(timeout=0.5)
 
-def show_traffic_light_color(robot: Robot, color: str) -> None:
-    if color == "red":
-        robot.set_led(LED.RED, LED_BRIGHTNESS)
-        robot.set_led(LED.GREEN, 0)
-    elif color == "green":
-        robot.set_led(LED.RED, 0)
-        robot.set_led(LED.GREEN, LED_BRIGHTNESS)
 
-def find_traffic_light_color(robot: Robot) -> str | None:
-    """Return the best recent red/green traffic-light result, or None."""
-    if not robot.is_vision_active(timeout_s=VISION_STALE_SEC):
-        return None
-
-    best_color = None
-    best_confidence = -1.0
-
-    for detection in robot.get_detections("traffic light"):
-        confidence = float(detection["confidence"])
-        if confidence < MIN_TRAFFIC_LIGHT_CONFIDENCE:
-            continue
-
-        attributes = detection.get("attributes", {})
-        color_attribute = attributes.get("color", {})
-        color = color_attribute.get("value")
-        if color not in ("red", "green"):
-            continue
-
-        if confidence > best_confidence:
-            best_confidence = confidence
-            best_color = str(color)
-
-    return best_color
 def show_idle_leds(robot: Robot) -> None:
     robot.set_led(LED.ORANGE, 200)
     robot.set_led(LED.GREEN, 0)
 
-def show_running_leds(robot: Robot) -> None:
+
+def show_moving_leds(robot: Robot) -> None:
     robot.set_led(LED.ORANGE, 0)
     robot.set_led(LED.GREEN, 200)
 
-def cancel_motion(handle) -> None:
-    if handle is None:
-        return
-    handle.cancel()
-    handle.wait(timeout=1.0)
 
-def print_status(robot: Robot, label: str) -> None:
+def print_status(robot: Robot) -> None:
     ox, oy, otheta = robot.get_odometry_pose()
     if ENABLE_GPS and robot.has_fused_pose():
-        fused_pose = robot.get_fused_pose()
-        if fused_pose is not None:
-            fx, fy, ftheta = fused_pose
-            print(
-                f"  [{label}] odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°  |  "
-                f"fused=({fx:6.0f}, {fy:6.0f}) mm  θ={ftheta:5.1f}°  "
-                f"(gps_fresh={robot.is_gps_active()})"
-            )
-            return
-    print(f"  [{label}] odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°")
+        fx, fy, ftheta = robot.get_fused_pose()
+        print(
+            f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ_odom={otheta:5.1f}°  |  "
+            f"fused=({fx:6.0f}, {fy:6.0f}) mm  θ_fused={ftheta:5.1f}°  "
+            f"gps={'fresh' if robot.is_gps_active() else 'stale'}"
+        )
+    else:
+        print(f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°")
 
-# ---------------------------------------------------------------------------
-# run() - entry point called by the robot node
-# ---------------------------------------------------------------------------
+
+def start_path(robot: Robot):
+    return robot.purepursuit_follow_path(
+        waypoints=PATH_CONTROL_POINTS,
+        velocity=VELOCITY_MM_S,
+        lookahead=LOOKAHEAD_MM,
+        tolerance=TOLERANCE_MM,
+        advance_radius=ADVANCE_RADIUS_MM,
+        max_angular_rad_s=MAX_ANGULAR_RAD_S,
+        blocking=False,
+    )
+
 
 def run(robot: Robot) -> None:
     configure_robot(robot)
 
     state = "INIT"
-    lights_off_at = 0.0
-    last_shown_color = None
-    green_last_seen_at = 0.0
+    drive_handle = None
+    last_status_print_at = 0.0
 
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
 
     while True:
+        now = time.monotonic()
 
-        # -- INIT -----------------------------------------------------------
         if state == "INIT":
             start_robot(robot)
-            dim_all_leds(robot)
-            print("[FSM] WATCHING - show a red or green traffic light")
-            state = "WATCHING"
+            reset_mission_pose(robot)
+            show_idle_leds(robot)
+            print("[FSM] IDLE — press BTN_1 to start path, BTN_2 to cancel")
+            print(
+                f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s  lookahead={LOOKAHEAD_MM:.0f} mm  "
+                f"tolerance={TOLERANCE_MM:.0f} mm  advance_radius={ADVANCE_RADIUS_MM:.0f} mm"
+            )
+            if ENABLE_LIDAR:
+                print(
+                    f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
+                    f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_RANGE_MIN_MM:.0f}-"
+                    f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
+                )
+            if ENABLE_GPS:
+                print(
+                    f"[CFG] gps tag_id={TAG_ID}  "
+                    f"tag_body=({TAG_BODY_OFFSET_X_MM:.0f}, {TAG_BODY_OFFSET_Y_MM:.0f}) mm  "
+                    f"position_alpha={GPS_POSITION_ALPHA:.2f}"
+                )
+                if ENABLE_GPS_TANGENT_HEADING:
+                    print(
+                        f"[CFG] heading=gps_tangent  "
+                        f"alpha={GPS_TANGENT_ALPHA:.2f}  "
+                        f"min_displacement={GPS_TANGENT_MIN_DISPLACEMENT_MM:.0f} mm"
+                    )
+                else:
+                    print("[CFG] heading=imu")
+            state = "IDLE"
 
-        # -- WATCHING -------------------------------------------------------
-        elif state == "WATCHING":
-            now = time.monotonic()
+        elif state == "IDLE":
+            if robot.was_button_pressed(Button.BTN_1):
+                reset_mission_pose(robot)
+                show_moving_leds(robot)
+                print(f"[FSM] MOVING — {len(PATH_CONTROL_POINTS)} waypoints")
+                drive_handle = start_path(robot)
+                last_status_print_at = now
+                state = "MOVING"
 
-            traffic_light_color = find_traffic_light_color(robot)
-
-            if traffic_light_color == "green":
-                if last_shown_color != "green":
-                    print("[VISION] traffic light: green — driving forward")
-                last_shown_color = "green"
-                green_last_seen_at = now
-                lights_off_at = now + LIGHT_HOLD_SEC
-                show_traffic_light_color(robot, "green")
-                robot.set_velocity(DRIVE_VELOCITY_MM_S, 0.0)
-
-            elif traffic_light_color == "red":
-                if last_shown_color != "red":
-                    print("[VISION] traffic light: red — stopped")
-                last_shown_color = "red"
-                green_last_seen_at = 0.0
-                lights_off_at = now + LIGHT_HOLD_SEC
-                show_traffic_light_color(robot, "red")
+        elif state == "MOVING":
+            if robot.was_button_pressed(Button.BTN_2):
+                if drive_handle is not None:
+                    drive_handle.cancel()
+                    drive_handle.wait(timeout=1.0)
+                    drive_handle = None
                 robot.stop()
-
-            elif green_last_seen_at > 0.0 and (now - green_last_seen_at) < GREEN_HOLD_SEC:
-                # Green was seen recently — keep driving even if it just left the frame
-                lights_off_at = now + LIGHT_HOLD_SEC
-                robot.set_velocity(DRIVE_VELOCITY_MM_S, 0.0)
-
+                show_idle_leds(robot)
+                print("[FSM] IDLE — path cancelled")
+                state = "IDLE"
             else:
-                # No green seen for GREEN_HOLD_SEC (camera covered, or never triggered)
-                robot.stop()
-                if lights_off_at > 0.0 and now >= lights_off_at:
-                    dim_all_leds(robot)
-                    lights_off_at = 0.0
-                    if last_shown_color is not None:
-                        print("[VISION] no recent red/green light - LEDs off")
-                    last_shown_color = None
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
+                if drive_handle is not None and drive_handle.is_finished():
+                    print("[FSM] DONE — path complete")
+                    print_status(robot)
+                    drive_handle = None
+                    robot.stop()
+                    show_idle_leds(robot)
+                    print("[FSM] IDLE — press BTN_1 to run again")
+                    state = "IDLE"
 
-        # -- Tick-rate control ---------------------------------------------
         next_tick += period
         sleep_s = next_tick - time.monotonic()
         if sleep_s > 0.0:
