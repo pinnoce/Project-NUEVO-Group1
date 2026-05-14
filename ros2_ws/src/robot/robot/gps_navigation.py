@@ -1,6 +1,8 @@
 import math
 
-from robot.robot import Robot
+from robot.robot
+
+import Robot
 
 
 TARGET_TOLERANCE_MM = 50.0
