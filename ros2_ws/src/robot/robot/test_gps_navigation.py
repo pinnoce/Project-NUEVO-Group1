@@ -42,7 +42,7 @@ from robot.robot import FirmwareState, Robot
 # =============================================================================
 
 # Options:
-#   "FULL_NAVIGATION_MISSION" -> visit 3 targets, then dropoff; no claw motion
+#   "FULL_NAVIGATION_MISSION" -> visit patty first, then buns, then dropoff; no claw motion
 #   "SINGLE_TARGET"           -> drive to TEST_TARGET only; no claw motion
 TEST_MODE = "FULL_NAVIGATION_MISSION"
 
@@ -180,7 +180,7 @@ def run_single_target_test(robot: Robot) -> None:
 
 
 def run_full_navigation_mission(robot: Robot) -> None:
-    print("[TEST GPS] Running GPS X-first/Y-second navigation-only mission.")
+    print("[TEST GPS] Running GPS X-first/Y-second navigation-only mission: patty first, then buns.")
     print("[TEST GPS] No claw commands will be sent.")
     print("[TEST GPS] Current target coordinates:")
     for target in GPS_OBJECT_TARGETS:
