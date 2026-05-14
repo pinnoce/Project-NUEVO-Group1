@@ -1,4 +1,9 @@
+from __future__ import annotations
+
 import time
+
+import rclpy
+from rclpy.node import Node
 
 from robot.hardware_map import (
     DEFAULT_FSM_HZ,
@@ -16,6 +21,7 @@ from robot.robot import FirmwareState, Robot
 from robot.scripted_navigation import drive_scripted_motion, reset_scripted_motion
 
 
+# This must exist inside SCRIPTED_PATHS in scripted_navigation.py
 TEST_SEGMENT = "TEST_FORWARD"
 
 
@@ -47,7 +53,8 @@ def run(robot: Robot) -> None:
     start_robot(robot)
     reset_scripted_motion()
 
-    print(f"[TEST SCRIPTED] running segment: {TEST_SEGMENT}")
+    print(f"[TEST SCRIPTED] Running scripted segment: {TEST_SEGMENT}")
+    print("[TEST SCRIPTED] Press Ctrl+C to stop early.")
 
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
@@ -57,7 +64,7 @@ def run(robot: Robot) -> None:
 
         if reached:
             robot.stop()
-            print("[TEST SCRIPTED] segment complete")
+            print("[TEST SCRIPTED] Segment complete.")
             break
 
         next_tick += period
@@ -67,3 +74,32 @@ def run(robot: Robot) -> None:
             time.sleep(sleep_s)
         else:
             next_tick = time.monotonic()
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
+
+    node = Node("test_scripted_navigation")
+    robot = Robot(node)
+
+    try:
+        run(robot)
+
+    except KeyboardInterrupt:
+        print("[TEST SCRIPTED] Interrupted. Stopping robot.")
+
+    finally:
+        try:
+            robot.stop()
+            robot.shutdown()
+        except Exception as exc:
+            print(f"[TEST SCRIPTED] Shutdown error: {exc}")
+
+        node.destroy_node()
+
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
