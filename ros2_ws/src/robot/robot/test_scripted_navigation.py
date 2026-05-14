@@ -7,6 +7,7 @@ import rclpy
 from rclpy.node import Node
 
 from robot.hardware_map import (
+    Button,
     DEFAULT_FSM_HZ,
     INITIAL_THETA_DEG,
     LEFT_WHEEL_DIR_INVERTED,
@@ -33,6 +34,9 @@ from robot.scripted_navigation import (
 #
 # This file does NOT use main.py and does NOT command the claw.
 # =============================================================================
+
+START_STOP_BUTTON_ID = int(Button.BTN_1)
+BUTTON_RELEASE_TIMEOUT_S = 10.0
 
 # Options:
 #   "FULL_NAVIGATION_MISSION" -> visit patty first, then buns, then dropoff; no claw
@@ -67,14 +71,50 @@ def start_spin_thread(node: Node) -> threading.Thread:
     return spin_thread
 
 
+
+
+def wait_until_button_released(robot: Robot, button_id: int = START_STOP_BUTTON_ID, timeout_s: float = BUTTON_RELEASE_TIMEOUT_S) -> None:
+    """Wait for the start/stop button to be released so one press is not counted twice."""
+    deadline = time.monotonic() + timeout_s
+    while robot.get_button(button_id):
+        if time.monotonic() > deadline:
+            print(f"[TEST SCRIPTED] BTN_{button_id} still held; continuing anyway")
+            break
+        time.sleep(0.02)
+
+    # Clear any edge created by the start press so the next press becomes stop.
+    robot.was_button_pressed(button_id, consume=True)
+
+
+def wait_for_start_button(robot: Robot, button_id: int = START_STOP_BUTTON_ID) -> None:
+    """Block here until BTN_1 is pressed. The rover will not move before this."""
+    robot.stop()
+    print(f"[TEST SCRIPTED] Ready. Press BTN_{button_id} to START the scripted navigation test.")
+    robot.wait_for_button(button_id)
+    wait_until_button_released(robot, button_id)
+    print(f"[TEST SCRIPTED] BTN_{button_id} pressed. Starting mission. Press BTN_{button_id} again to STOP.")
+
+
+def stop_button_pressed(robot: Robot, button_id: int = START_STOP_BUTTON_ID) -> bool:
+    """Return True once when BTN_1 is pressed during the mission."""
+    if robot.was_button_pressed(button_id, consume=True):
+        robot.stop()
+        print(f"[TEST SCRIPTED] BTN_{button_id} pressed. Stopping mission.")
+        return True
+    return False
+
+
 def run_segment_test(robot: Robot) -> None:
     print(f"[TEST SCRIPTED] Running scripted segment: {TEST_SEGMENT}")
-    print("[TEST SCRIPTED] No claw commands will be sent. Press Ctrl+C to stop early.")
+    print("[TEST SCRIPTED] No claw commands will be sent. Press BTN_1 to stop early, or Ctrl+C as a backup.")
 
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
 
     while True:
+        if stop_button_pressed(robot):
+            break
+
         reached = drive_scripted_motion(robot, TEST_SEGMENT)
         if reached:
             robot.stop()
@@ -92,13 +132,16 @@ def run_segment_test(robot: Robot) -> None:
 def run_full_navigation_mission(robot: Robot) -> None:
     print("[TEST SCRIPTED] Running scripted navigation-only mission: patty first, then buns.")
     print("[TEST SCRIPTED] Make sure the rover is physically at the scripted start pose.")
-    print("[TEST SCRIPTED] No claw commands will be sent. Press Ctrl+C to stop early.")
+    print("[TEST SCRIPTED] No claw commands will be sent. Press BTN_1 to stop early, or Ctrl+C as a backup.")
 
     mission = ScriptedNavigationMission()
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
 
     while True:
+        if stop_button_pressed(robot):
+            break
+
         if mission.update(robot):
             robot.stop()
             print("[TEST SCRIPTED] Scripted navigation-only mission complete.")
@@ -116,6 +159,7 @@ def run(robot: Robot) -> None:
     configure_robot(robot)
     start_robot(robot)
     reset_all_scripted_state()
+    wait_for_start_button(robot)
 
     if TEST_MODE == "SEGMENT_ONLY":
         run_segment_test(robot)
