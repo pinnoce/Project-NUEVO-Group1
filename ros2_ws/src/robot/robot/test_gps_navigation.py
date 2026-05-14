@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import rclpy
 from rclpy.node import Node
 
+from robot.gps_navigation import (
+    AXIS_TARGET_TOLERANCE_MM,
+    GPS_DROPOFF_TARGET,
+    GPS_OBJECT_TARGETS,
+    GpsNavigationMission,
+    GpsTarget,
+    align_to_heading_gps,
+    drive_axis_gps,
+    drive_to_world_point_gps,
+    get_navigation_pose,
+    make_axis_aligned_goal,
+)
 from robot.hardware_map import (
     DEFAULT_FSM_HZ,
     INITIAL_THETA_DEG,
@@ -13,32 +26,37 @@ from robot.hardware_map import (
     POSITION_UNIT,
     RIGHT_WHEEL_DIR_INVERTED,
     RIGHT_WHEEL_MOTOR,
-    TAG_BODY_OFFSET_X_MM,
-    TAG_BODY_OFFSET_Y_MM,
     WHEEL_BASE,
     WHEEL_DIAMETER,
 )
-
 from robot.robot import FirmwareState, Robot
-from robot.gps_navigation import drive_to_world_point_gps
 
+# =============================================================================
+# Standalone GPS-navigation-only test
+# =============================================================================
+# Run from inside the ROS2 container after starting the bridge node:
+#   cd /ros2_ws/src/robot
+#   python3 -m robot.test_gps_navigation
+#
+# This file does NOT use main.py and does NOT command the claw.
+# =============================================================================
 
-# ---------------------------------------------------------------------------
-# Change these for your actual course/test
-# ---------------------------------------------------------------------------
+# Options:
+#   "FULL_NAVIGATION_MISSION" -> visit 3 targets, then dropoff; no claw motion
+#   "SINGLE_TARGET"           -> drive to TEST_TARGET only; no claw motion
+TEST_MODE = "FULL_NAVIGATION_MISSION"
 
-# Replace this with the ArUco marker ID mounted on your rover.
-TAG_ID = 19
-
-# Pick a safe nearby world-frame test target.
-# Units: mm.
+# Options for SINGLE_TARGET:
+#   "XY_FIRST" -> move X first, then Y
+#   "DIRECT"   -> direct/diagonal drive; useful only for quick debugging
+SINGLE_TARGET_ROUTE_MODE = "XY_FIRST"
+TEST_TARGET_NAME = "single_test_target"
 TEST_TARGET_X_MM = 500.0
 TEST_TARGET_Y_MM = 300.0
 
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
-
     robot.set_odometry_parameters(
         wheel_diameter=WHEEL_DIAMETER,
         wheel_base=WHEEL_BASE,
@@ -49,59 +67,33 @@ def configure_robot(robot: Robot) -> None:
         right_motor_dir_inverted=RIGHT_WHEEL_DIR_INVERTED,
     )
 
-    robot.enable_gps()
-    robot.set_tracked_tag_id(TAG_ID)
-    robot.set_tag_body_offset(
-        TAG_BODY_OFFSET_X_MM,
-        TAG_BODY_OFFSET_Y_MM,
-    )
-
-    print(f"[TEST GPS] tracking ArUco tag ID: {TAG_ID}")
-
 
 def start_robot(robot: Robot) -> None:
     current = robot.get_state()
-
     if current in (FirmwareState.ESTOP, FirmwareState.ERROR):
         robot.reset_estop()
-
     robot.set_state(FirmwareState.RUNNING)
 
 
+def start_spin_thread(node: Node) -> threading.Thread:
+    spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    spin_thread.start()
+    return spin_thread
+
+
 def print_pose_status(robot: Robot) -> None:
-    ox, oy, otheta = robot.get_odometry_pose()
+    pose = get_navigation_pose(robot)
+    if pose is None:
+        print("[TEST GPS] pose unavailable; make sure camera/GPS/ArUco pose is active")
+        return
 
-    if robot.has_fused_pose():
-        fused_pose = robot.get_fused_pose()
-
-        if fused_pose is not None:
-            fx, fy, ftheta = fused_pose
-
-            print(
-                f"[TEST GPS] "
-                f"odom=({ox:6.0f}, {oy:6.0f}) mm theta={otheta:5.1f} deg | "
-                f"fused=({fx:6.0f}, {fy:6.0f}) mm theta={ftheta:5.1f} deg | "
-                f"gps_fresh={robot.is_gps_active()}"
-            )
-            return
-
-    print(
-        f"[TEST GPS] "
-        f"odom=({ox:6.0f}, {oy:6.0f}) mm theta={otheta:5.1f} deg | "
-        f"gps_fresh={robot.is_gps_active()}"
-    )
+    x_mm, y_mm, theta_deg = pose
+    print(f"[TEST GPS] pose x={x_mm:.0f} mm, y={y_mm:.0f} mm, theta={theta_deg:.1f} deg")
 
 
-def run(robot: Robot) -> None:
-    configure_robot(robot)
-    start_robot(robot)
-
-    print(
-        f"[TEST GPS] driving to target "
-        f"({TEST_TARGET_X_MM:.0f}, {TEST_TARGET_Y_MM:.0f}) mm"
-    )
-    print("[TEST GPS] waiting for valid ArUco/GPS pose")
-    print("[TEST GPS] press Ctrl+C to stop early")
+def run_single_target_direct_test(robot: Robot) -> None:
+    print(f"[TEST GPS] DIRECT driving to target ({TEST_TARGET_X_MM:.0f}, {TEST_TARGET_Y_MM:.0f}) mm")
+    print("[TEST GPS] No claw commands will be sent. Press Ctrl+C to stop early.")
 
     period = 1.0 / float(DEFAULT_FSM_HZ)
     next_tick = time.monotonic()
@@ -109,54 +101,152 @@ def run(robot: Robot) -> None:
 
     while True:
         now = time.monotonic()
-
         if now - last_status_print >= 1.0:
             print_pose_status(robot)
             last_status_print = now
 
-        reached = drive_to_world_point_gps(
-            robot,
-            TEST_TARGET_X_MM,
-            TEST_TARGET_Y_MM,
-        )
-
+        reached = drive_to_world_point_gps(robot, TEST_TARGET_X_MM, TEST_TARGET_Y_MM)
         if reached:
             robot.stop()
-            print("[TEST GPS] target reached")
+            print("[TEST GPS] direct target reached; no pickup command sent")
             break
 
         next_tick += period
         sleep_s = next_tick - time.monotonic()
-
         if sleep_s > 0.0:
             time.sleep(sleep_s)
         else:
             next_tick = time.monotonic()
 
 
+def run_single_target_xy_first_test(robot: Robot) -> None:
+    print(f"[TEST GPS] X-first/Y-second driving to target ({TEST_TARGET_X_MM:.0f}, {TEST_TARGET_Y_MM:.0f}) mm")
+    print("[TEST GPS] No claw commands will be sent. Press Ctrl+C to stop early.")
+
+    target = GpsTarget(TEST_TARGET_NAME, TEST_TARGET_X_MM, TEST_TARGET_Y_MM)
+    goal = None
+    phase = "PREPARE"
+
+    period = 1.0 / float(DEFAULT_FSM_HZ)
+    next_tick = time.monotonic()
+    last_status_print = 0.0
+
+    while True:
+        now = time.monotonic()
+        if now - last_status_print >= 1.0:
+            print_pose_status(robot)
+            last_status_print = now
+
+        if phase == "PREPARE":
+            goal = make_axis_aligned_goal(robot, target)
+            if goal is not None:
+                phase = "X"
+
+        elif phase == "X":
+            assert goal is not None
+            if drive_axis_gps(robot, "X", goal.center_x_mm, AXIS_TARGET_TOLERANCE_MM):
+                phase = "Y"
+
+        elif phase == "Y":
+            assert goal is not None
+            if drive_axis_gps(robot, "Y", goal.center_y_mm, goal.tolerance_mm):
+                phase = "ALIGN"
+
+        elif phase == "ALIGN":
+            assert goal is not None
+            if align_to_heading_gps(robot, goal.final_heading_deg):
+                robot.stop()
+                print("[TEST GPS] X-first/Y-second target reached and aligned; no pickup command sent")
+                break
+
+        else:
+            raise RuntimeError(f"Unknown single-target phase: {phase}")
+
+        next_tick += period
+        sleep_s = next_tick - time.monotonic()
+        if sleep_s > 0.0:
+            time.sleep(sleep_s)
+        else:
+            next_tick = time.monotonic()
+
+
+def run_single_target_test(robot: Robot) -> None:
+    if SINGLE_TARGET_ROUTE_MODE == "XY_FIRST":
+        run_single_target_xy_first_test(robot)
+    elif SINGLE_TARGET_ROUTE_MODE == "DIRECT":
+        run_single_target_direct_test(robot)
+    else:
+        raise ValueError(f"Unknown SINGLE_TARGET_ROUTE_MODE: {SINGLE_TARGET_ROUTE_MODE}")
+
+
+def run_full_navigation_mission(robot: Robot) -> None:
+    print("[TEST GPS] Running GPS X-first/Y-second navigation-only mission.")
+    print("[TEST GPS] No claw commands will be sent.")
+    print("[TEST GPS] Current target coordinates:")
+    for target in GPS_OBJECT_TARGETS:
+        print(f"  - {target.name}: ({target.x_mm:.0f}, {target.y_mm:.0f}) mm")
+    print(f"  - dropoff: ({GPS_DROPOFF_TARGET.x_mm:.0f}, {GPS_DROPOFF_TARGET.y_mm:.0f}) mm")
+    print("[TEST GPS] Press Ctrl+C to stop early.")
+
+    if get_navigation_pose(robot) is None:
+        print("[TEST GPS] No fused pose yet. Make sure the camera sees the rover ArUco tag.")
+
+    mission = GpsNavigationMission()
+    period = 1.0 / float(DEFAULT_FSM_HZ)
+    next_tick = time.monotonic()
+    last_status_print = 0.0
+
+    while True:
+        now = time.monotonic()
+        if now - last_status_print >= 1.0:
+            print_pose_status(robot)
+            last_status_print = now
+
+        if mission.update(robot):
+            robot.stop()
+            print("[TEST GPS] GPS navigation-only mission complete.")
+            break
+
+        next_tick += period
+        sleep_s = next_tick - time.monotonic()
+        if sleep_s > 0.0:
+            time.sleep(sleep_s)
+        else:
+            next_tick = time.monotonic()
+
+
+def run(robot: Robot) -> None:
+    configure_robot(robot)
+    start_robot(robot)
+
+    if TEST_MODE == "SINGLE_TARGET":
+        run_single_target_test(robot)
+    elif TEST_MODE == "FULL_NAVIGATION_MISSION":
+        run_full_navigation_mission(robot)
+    else:
+        raise ValueError(f"Unknown TEST_MODE: {TEST_MODE}")
+
+
 def main(args=None) -> None:
     rclpy.init(args=args)
-
     node = Node("test_gps_navigation")
+    spin_thread = start_spin_thread(node)
     robot = Robot(node)
 
     try:
         run(robot)
-
     except KeyboardInterrupt:
         print("[TEST GPS] interrupted; stopping robot")
-
     finally:
         try:
             robot.stop()
             robot.shutdown()
         except Exception as exc:
             print(f"[TEST GPS] shutdown error: {exc}")
-
         node.destroy_node()
-
         if rclpy.ok():
             rclpy.shutdown()
+        spin_thread.join(timeout=1.0)
 
 
 if __name__ == "__main__":
