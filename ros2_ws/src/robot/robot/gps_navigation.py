@@ -67,9 +67,12 @@ class AxisAlignedGoal:
 
 # Replace these with your measured world-frame course coordinates.
 # These are the locations the rover should visit during the navigation-only test.
+# Mission order is intentionally patty first, even if the patty is physically
+# between the two bun locations. Change the order of this list to change the
+# visit sequence.
 GPS_OBJECT_TARGETS: list[GpsTarget] = [
-    GpsTarget("bottom_bun_location", 500.0, 300.0),
     GpsTarget("patty_location", 900.0, 300.0),
+    GpsTarget("bottom_bun_location", 500.0, 300.0),
     GpsTarget("top_bun_location", 1300.0, 300.0),
 ]
 
@@ -378,6 +381,8 @@ def drive_to_world_point_gps(
 class GpsNavigationMission:
     """
     Non-blocking GPS mission: visit 3 target locations, then visit dropoff.
+
+    Default visit order is patty first, bottom bun second, top bun third.
 
     No claw commands are sent. The mission intentionally uses X-first, then Y
     movement for every target to avoid diagonal travel into the table.
