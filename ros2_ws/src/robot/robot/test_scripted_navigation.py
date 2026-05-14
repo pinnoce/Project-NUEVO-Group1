@@ -35,7 +35,7 @@ from robot.scripted_navigation import (
 # =============================================================================
 
 # Options:
-#   "FULL_NAVIGATION_MISSION" -> visit 3 scripted targets, then dropoff; no claw
+#   "FULL_NAVIGATION_MISSION" -> visit patty first, then buns, then dropoff; no claw
 #   "SEGMENT_ONLY"            -> run TEST_SEGMENT only
 TEST_MODE = "FULL_NAVIGATION_MISSION"
 TEST_SEGMENT = "TEST_FORWARD"
@@ -90,7 +90,7 @@ def run_segment_test(robot: Robot) -> None:
 
 
 def run_full_navigation_mission(robot: Robot) -> None:
-    print("[TEST SCRIPTED] Running scripted navigation-only mission.")
+    print("[TEST SCRIPTED] Running scripted navigation-only mission: patty first, then buns.")
     print("[TEST SCRIPTED] Make sure the rover is physically at the scripted start pose.")
     print("[TEST SCRIPTED] No claw commands will be sent. Press Ctrl+C to stop early.")
 
