@@ -23,7 +23,7 @@ class Motor(IntEnum):
 # Robot defaults can import one source of truth for the drive base, lidar
 # self-filtering, and GPS tag mounting geometry.
 POSITION_UNIT = Unit.MM
-WHEEL_DIAMETER = 75.0
+WHEEL_DIAMETER = 80.0
 WHEEL_BASE = 290.0
 INITIAL_THETA_DEG = 90.0
 

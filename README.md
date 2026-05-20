@@ -50,6 +50,18 @@ A modular two-wheeled mobile robot platform designed for hands-on robotics educa
 | [firmware/docs/README.md](firmware/docs/README.md) | Firmware subsystem documentation index |
 | [NUEVO board/SPECIFICATIONS.md](NUEVO%20board/SPECIFICATIONS.md) | PCB hardware specifications |
 
+## Current Mission Behavior (`ros2_ws/src/robot/robot/main.py`)
+
+The robot node ships with a five-state FSM that demonstrates the full sensing → planning → control stack:
+
+1. **IDLE** — orange LED; press `BTN_1` to start (`BTN_2` cancels at any stage).
+2. **LOOK_LEFT** — turns `LOOK_LEFT_OFFSET_DEG` (default 40°) CCW from the initial heading so the camera faces the traffic light.
+3. **WATCHING** — blue LED; polls `/vision/detections` for a `traffic light` detection whose `color = green` and `confidence ≥ MIN_TRAFFIC_LIGHT_CONFIDENCE` (default 0.50). Detections older than `VISION_STALE_SEC` (3 s) are ignored.
+4. **TURN_BACK** — green LED; rotates back to `INITIAL_THETA_DEG` (90°).
+5. **MOVING** — follows `PATH_CONTROL_POINTS` with pure pursuit (`purepursuit_follow_path`).
+
+Tune via the constants block near the top of `main.py`. Hardware constants (wheel diameter, wheel base, motor IDs) come from `ros2_ws/src/robot/robot/hardware_map.py`.
+
 ## Technologies
 
 - **Embedded**: Arduino (C/C++)

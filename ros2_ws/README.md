@@ -335,6 +335,21 @@ The `robot` node is the main student application layer. Students only edit
 `src/robot/robot/main.py`. See
 [`src/robot/README.md`](src/robot/README.md) for the API reference.
 
+The current `main.py` runs a five-state FSM that integrates vision and pure-pursuit
+path following:
+
+1. `IDLE` — orange LED; press `BTN_1` to start (`BTN_2` cancels at any stage).
+2. `LOOK_LEFT` — turns `LOOK_LEFT_OFFSET_DEG` CCW from the initial heading.
+3. `WATCHING` — blue LED; polls `/vision/detections` for a green `traffic light`
+   above `MIN_TRAFFIC_LIGHT_CONFIDENCE`, ignoring frames older than
+   `VISION_STALE_SEC`.
+4. `TURN_BACK` — rotates back to `INITIAL_THETA_DEG`.
+5. `MOVING` — follows `PATH_CONTROL_POINTS` with `purepursuit_follow_path`.
+
+All tuning constants live in the constants block near the top of `main.py`;
+hardware geometry lives in `src/robot/robot/hardware_map.py` (note: the drive
+base now uses `WHEEL_DIAMETER = 80.0` mm).
+
 The `sensors` and `vision` packages can be started the same way when needed.
 
 

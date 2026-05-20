@@ -1,12 +1,13 @@
 """
-pure_pursuit.py — FSM-based pure-pursuit path following
-=======================================================
-Copy this file over main.py, then restart the robot node:
+main.py — Look-left → watch-for-green → pure-pursuit path following
+==================================================================
+On BTN_1 the robot:
+  1. Turns LOOK_LEFT_OFFSET_DEG (30°) CCW from its initial heading.
+  2. Watches the camera for a green traffic light.
+  3. Turns back to the initial heading.
+  4. Follows PATH_CONTROL_POINTS with pure pursuit.
 
-    cp examples/pure_pursuit.py main.py
-    ros2 run robot robot
-
-BTN_1 starts the path. BTN_2 cancels and returns to IDLE.
+BTN_2 cancels at any stage and returns to IDLE.
 """
 
 from __future__ import annotations
@@ -47,7 +48,17 @@ from robot.util import densify_polyline  # noqa: F401 - optional helper for stud
 ENABLE_LIDAR = False
 ENABLE_GPS   = False
 
-TAG_ID = 19  # IMPORTANT: set to the ArUco marker ID on your robot
+TAG_ID = 15  # IMPORTANT: set to the ArUco marker ID on your robot
+
+
+# ---------------------------------------------------------------------------
+# Look-for-green configuration
+# ---------------------------------------------------------------------------
+
+LOOK_LEFT_OFFSET_DEG         = 40.0   # CCW offset from INITIAL_THETA_DEG
+TURN_TOLERANCE_DEG           = 3.0
+VISION_STALE_SEC             = 3.0
+MIN_TRAFFIC_LIGHT_CONFIDENCE = 0.50
 
 
 # ---------------------------------------------------------------------------
@@ -69,10 +80,10 @@ TAG_ID = 19  # IMPORTANT: set to the ArUco marker ID on your robot
 # To tune: watch θ_odom vs θ_fused in the status output while running.
 # ---------------------------------------------------------------------------
 
-GPS_POSITION_ALPHA           = 0.20
+GPS_POSITION_ALPHA           = 0.30
 ENABLE_GPS_TANGENT_HEADING   = True
-GPS_TANGENT_ALPHA            = 0.15
-GPS_TANGENT_MIN_DISPLACEMENT_MM = 150.0
+GPS_TANGENT_ALPHA            = 0.25
+GPS_TANGENT_MIN_DISPLACEMENT_MM = 50.0
 
 
 # ---------------------------------------------------------------------------
@@ -81,14 +92,18 @@ GPS_TANGENT_MIN_DISPLACEMENT_MM = 150.0
 
 PATH_CONTROL_POINTS = [
     (0.0, 3350.0), # starting from cross (straight then turn on to ramp lane)
-    (400.0, 3450.0),
-    (410.0, 500.0),
+    (410.0, 3350.0),
+    (410.0, 630.0),
+    (1210.0, 630.0),
+    (1210.0, 3350.0),
+    (1710.0, 3350.0),
+    (1710.0, 630.0),
 ]
 
 # Optional: densify long segments for smoother tracking.
 PATH_CONTROL_POINTS = densify_polyline(PATH_CONTROL_POINTS, spacing=50.0)
 
-VELOCITY_MM_S      = 150.0
+VELOCITY_MM_S      = 100.0
 LOOKAHEAD_MM       = 120.0
 TOLERANCE_MM       = 25.0
 ADVANCE_RADIUS_MM  = 80.0
@@ -96,9 +111,12 @@ MAX_ANGULAR_RAD_S  = 1.0
 
 STATUS_PRINT_INTERVAL_S = 0.5
 
+LOOK_HEADING_DEG = INITIAL_THETA_DEG + LOOK_LEFT_OFFSET_DEG
+
 
 def configure_robot(robot: Robot) -> None:
     robot.set_unit(POSITION_UNIT)
+    robot.enable_vision()
     robot.set_odometry_parameters(
         wheel_diameter=WHEEL_DIAMETER,
         wheel_base=WHEEL_BASE,
@@ -161,6 +179,16 @@ def show_moving_leds(robot: Robot) -> None:
     robot.set_led(LED.GREEN, 200)
 
 
+def show_watching_leds(robot: Robot) -> None:
+    robot.set_led(LED.ORANGE, 0)
+    robot.set_led(LED.GREEN, 0)
+    robot.set_led(LED.BLUE, 200)
+
+
+def clear_watching_leds(robot: Robot) -> None:
+    robot.set_led(LED.BLUE, 0)
+
+
 def print_status(robot: Robot) -> None:
     ox, oy, otheta = robot.get_odometry_pose()
     if ENABLE_GPS and robot.has_fused_pose():
@@ -172,6 +200,27 @@ def print_status(robot: Robot) -> None:
         )
     else:
         print(f"  odom=({ox:6.0f}, {oy:6.0f}) mm  θ={otheta:5.1f}°")
+
+
+def see_green_light(robot: Robot) -> bool:
+    """True if a green traffic-light detection passes the confidence floor."""
+    if not robot.is_vision_active(timeout_s=VISION_STALE_SEC):
+        return False
+    for detection in robot.get_detections("traffic light"):
+        if float(detection["confidence"]) < MIN_TRAFFIC_LIGHT_CONFIDENCE:
+            continue
+        color = detection.get("attributes", {}).get("color", {}).get("value")
+        if color == "green":
+            return True
+    return False
+
+
+def start_turn_to(robot: Robot, angle_deg: float):
+    return robot.turn_to(
+        angle_deg,
+        blocking=False,
+        tolerance_deg=TURN_TOLERANCE_DEG,
+    )
 
 
 def start_path(robot: Robot):
@@ -186,11 +235,18 @@ def start_path(robot: Robot):
     )
 
 
+def cancel_handle(handle) -> None:
+    if handle is None:
+        return
+    handle.cancel()
+    handle.wait(timeout=1.0)
+
+
 def run(robot: Robot) -> None:
     configure_robot(robot)
 
     state = "INIT"
-    drive_handle = None
+    motion_handle = None
     last_status_print_at = 0.0
 
     period = 1.0 / float(DEFAULT_FSM_HZ)
@@ -203,10 +259,15 @@ def run(robot: Robot) -> None:
             start_robot(robot)
             reset_mission_pose(robot)
             show_idle_leds(robot)
-            print("[FSM] IDLE — press BTN_1 to start path, BTN_2 to cancel")
+            print("[FSM] IDLE — press BTN_1 to start (look-left → watch → path), BTN_2 to cancel")
             print(
                 f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s  lookahead={LOOKAHEAD_MM:.0f} mm  "
                 f"tolerance={TOLERANCE_MM:.0f} mm  advance_radius={ADVANCE_RADIUS_MM:.0f} mm"
+            )
+            print(
+                f"[CFG] look_heading={LOOK_HEADING_DEG:.1f}°  "
+                f"initial_heading={INITIAL_THETA_DEG:.1f}°  "
+                f"min_green_conf={MIN_TRAFFIC_LIGHT_CONFIDENCE:.2f}"
             )
             if ENABLE_LIDAR:
                 print(
@@ -233,18 +294,57 @@ def run(robot: Robot) -> None:
         elif state == "IDLE":
             if robot.was_button_pressed(Button.BTN_1):
                 reset_mission_pose(robot)
+                show_watching_leds(robot)
+                print(f"[FSM] LOOK_LEFT — turning to {LOOK_HEADING_DEG:.1f}°")
+                motion_handle = start_turn_to(robot, LOOK_HEADING_DEG)
+                state = "LOOK_LEFT"
+
+        elif state == "LOOK_LEFT":
+            if robot.was_button_pressed(Button.BTN_2):
+                cancel_handle(motion_handle)
+                motion_handle = None
+                robot.stop()
+                clear_watching_leds(robot)
+                show_idle_leds(robot)
+                print("[FSM] IDLE — cancelled during look-left turn")
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                print("[FSM] WATCHING — waiting for green traffic light")
+                state = "WATCHING"
+
+        elif state == "WATCHING":
+            if robot.was_button_pressed(Button.BTN_2):
+                clear_watching_leds(robot)
+                show_idle_leds(robot)
+                print("[FSM] IDLE — cancelled while watching")
+                state = "IDLE"
+            elif see_green_light(robot):
+                print(f"[VISION] green light detected — turning back to {INITIAL_THETA_DEG:.1f}°")
+                clear_watching_leds(robot)
                 show_moving_leds(robot)
+                motion_handle = start_turn_to(robot, INITIAL_THETA_DEG)
+                state = "TURN_BACK"
+
+        elif state == "TURN_BACK":
+            if robot.was_button_pressed(Button.BTN_2):
+                cancel_handle(motion_handle)
+                motion_handle = None
+                robot.stop()
+                show_idle_leds(robot)
+                print("[FSM] IDLE — cancelled during turn-back")
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
                 print(f"[FSM] MOVING — {len(PATH_CONTROL_POINTS)} waypoints")
-                drive_handle = start_path(robot)
+                motion_handle = start_path(robot)
                 last_status_print_at = now
                 state = "MOVING"
 
         elif state == "MOVING":
             if robot.was_button_pressed(Button.BTN_2):
-                if drive_handle is not None:
-                    drive_handle.cancel()
-                    drive_handle.wait(timeout=1.0)
-                    drive_handle = None
+                cancel_handle(motion_handle)
+                motion_handle = None
                 robot.stop()
                 show_idle_leds(robot)
                 print("[FSM] IDLE — path cancelled")
@@ -253,10 +353,10 @@ def run(robot: Robot) -> None:
                 if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
                     print_status(robot)
                     last_status_print_at = now
-                if drive_handle is not None and drive_handle.is_finished():
+                if motion_handle is not None and motion_handle.is_finished():
                     print("[FSM] DONE — path complete")
                     print_status(robot)
-                    drive_handle = None
+                    motion_handle = None
                     robot.stop()
                     show_idle_leds(robot)
                     print("[FSM] IDLE — press BTN_1 to run again")
