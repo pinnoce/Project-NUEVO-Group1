@@ -30,6 +30,13 @@ def generate_launch_description():
                 )
             ),
         ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution(
+                    [FindPackageShare("vision"), "launch", "vision_debug.launch.py"]
+                )
+            ),
+        ),
         Node(
             package="robot",
             executable="robot",
