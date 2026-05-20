@@ -55,10 +55,12 @@ TAG_ID = 15  # IMPORTANT: set to the ArUco marker ID on your robot
 # Look-for-green configuration
 # ---------------------------------------------------------------------------
 
-LOOK_LEFT_OFFSET_DEG         = 40.0   # CCW offset from INITIAL_THETA_DEG
-TURN_TOLERANCE_DEG           = 3.0
-VISION_STALE_SEC             = 3.0
-MIN_TRAFFIC_LIGHT_CONFIDENCE = 0.50
+LOOK_LEFT_OFFSET_DEG          = 35.0   # CCW offset from INITIAL_THETA_DEG
+TURN_TOLERANCE_DEG            = 3.0
+LOOK_TURN_MAX_ANGULAR_RAD_S   = 0.4    # slow look-left turn (~23°/s)
+RETURN_TURN_MAX_ANGULAR_RAD_S = 1.0    # default fast cap for turn-back
+VISION_STALE_SEC              = 3.0
+MIN_TRAFFIC_LIGHT_CONFIDENCE  = 0.50
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +99,7 @@ PATH_CONTROL_POINTS = [
     (1210.0, 630.0),
     (1210.0, 3350.0),
     (1710.0, 3350.0),
-    (1710.0, 630.0),
+    (1710.0, 600.0),
 ]
 
 # Optional: densify long segments for smoother tracking.
@@ -107,7 +109,7 @@ VELOCITY_MM_S      = 100.0
 LOOKAHEAD_MM       = 120.0
 TOLERANCE_MM       = 25.0
 ADVANCE_RADIUS_MM  = 80.0
-MAX_ANGULAR_RAD_S  = 1.0
+MAX_ANGULAR_RAD_S  = 0.8
 
 STATUS_PRINT_INTERVAL_S = 0.5
 
@@ -215,11 +217,12 @@ def see_green_light(robot: Robot) -> bool:
     return False
 
 
-def start_turn_to(robot: Robot, angle_deg: float):
+def start_turn_to(robot: Robot, angle_deg: float, max_angular_rad_s: float = 1.0):
     return robot.turn_to(
         angle_deg,
         blocking=False,
         tolerance_deg=TURN_TOLERANCE_DEG,
+        max_angular_rad_s=max_angular_rad_s,
     )
 
 
@@ -296,7 +299,10 @@ def run(robot: Robot) -> None:
                 reset_mission_pose(robot)
                 show_watching_leds(robot)
                 print(f"[FSM] LOOK_LEFT — turning to {LOOK_HEADING_DEG:.1f}°")
-                motion_handle = start_turn_to(robot, LOOK_HEADING_DEG)
+                motion_handle = start_turn_to(
+                    robot, LOOK_HEADING_DEG,
+                    max_angular_rad_s=LOOK_TURN_MAX_ANGULAR_RAD_S,
+                )
                 state = "LOOK_LEFT"
 
         elif state == "LOOK_LEFT":
@@ -323,7 +329,10 @@ def run(robot: Robot) -> None:
                 print(f"[VISION] green light detected — turning back to {INITIAL_THETA_DEG:.1f}°")
                 clear_watching_leds(robot)
                 show_moving_leds(robot)
-                motion_handle = start_turn_to(robot, INITIAL_THETA_DEG)
+                motion_handle = start_turn_to(
+                    robot, INITIAL_THETA_DEG,
+                    max_angular_rad_s=RETURN_TURN_MAX_ANGULAR_RAD_S,
+                )
                 state = "TURN_BACK"
 
         elif state == "TURN_BACK":
