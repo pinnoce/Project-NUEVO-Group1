@@ -72,6 +72,9 @@ Behavior:
 - bounding boxes use pixel coordinates in the captured image
 - traffic-light detections include a `color` attribute when color
   classification is enabled
+- person detections include a `gender` attribute (`male` / `female`) from the
+  YOLO-cls model at `ros2_ws/src/vision/data/gender_cls_ncnn/`, alongside the
+  existing `face_lighting` attribute
 - optional debug image output writes annotated frames to `/runtime_output/vision`
 
 ## Student Extension Points

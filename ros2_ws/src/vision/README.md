@@ -62,6 +62,7 @@ Examples of current attributes:
   - `color=red|green|other`
 - person:
   - `face_lighting=dim|normal|bright|unknown`
+  - `gender=male|female|unknown` (from the YOLO-cls model at `data/gender_cls_ncnn/`)
 - stop sign:
   - `visibility=clear|partial|weak|unknown`
 - yellow block:

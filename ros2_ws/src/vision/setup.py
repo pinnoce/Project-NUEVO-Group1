@@ -11,7 +11,11 @@ def model_data_files() -> list[tuple[str, list[str]]]:
         (f"share/{PACKAGE_NAME}/data", ["data/README.md"]),
     ]
 
-    for model_dir in sorted(Path("data").glob("yolo26n_ncnn_imgsz_*")):
+    model_dirs = sorted(
+        list(Path("data").glob("yolo26n_ncnn_imgsz_*"))
+        + [Path("data/gender_cls_ncnn")]
+    )
+    for model_dir in model_dirs:
         files = [
             str(model_dir / "metadata.yaml"),
             str(model_dir / "model.ncnn.bin"),

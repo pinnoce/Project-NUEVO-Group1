@@ -10,6 +10,7 @@ from rclpy.node import Node
 
 from vision.camera_utils import ManagedCamera
 from vision.debug_utils import DetectionDebugWriter
+from vision.gender_classifier import GenderNcnnClassifier
 from vision.model_utils import (
     DetectedObject,
     YoloNcnnDetector,
@@ -72,6 +73,11 @@ class VisionNode(Node):
         self.declare_parameter("process_rate_hz", 4.0)
         self.declare_parameter("model_path", str(model_default))
         self.declare_parameter("model_imgsz", 416)
+        self.declare_parameter(
+            "gender_model_path",
+            str(default_model_path(self._source_data_dir, self._share_data_dir, "gender_cls_ncnn")),
+        )
+        self.declare_parameter("gender_model_imgsz", 224)
         self.declare_parameter("confidence_threshold", 0.25)
         self.declare_parameter("iou_threshold", 0.7)
         self.declare_parameter("max_detections", 20)
@@ -149,6 +155,27 @@ class VisionNode(Node):
                 "on",
             )
         )
+
+        gender_model_imgsz = int(self.get_parameter("gender_model_imgsz").value)
+        self._gender_classifier: GenderNcnnClassifier | None = None
+        try:
+            gender_model_path = resolve_model_path(
+                raw_path=str(self.get_parameter("gender_model_path").value),
+                source_data_dir=self._source_data_dir,
+                share_data_dir=self._share_data_dir,
+            )
+            self._gender_classifier = GenderNcnnClassifier(
+                model_path=gender_model_path,
+                input_size=gender_model_imgsz,
+                ncnn_threads=self._ncnn_threads,
+            )
+            self.get_logger().info(
+                f"Loaded NCNN gender classifier path={gender_model_path} imgsz={gender_model_imgsz}"
+            )
+        except FileNotFoundError as exc:
+            self.get_logger().warn(
+                f"Gender classifier disabled (model not found): {exc}"
+            )
 
     def _infer_yolo_detections(self, frame) -> list[DetectedObject]:
         return self._detector.predict(frame)
@@ -231,6 +258,14 @@ class VisionNode(Node):
                         person_crop = object_crop
                         face_lighting_label, face_lighting_score = classify_person_face_lighting(person_crop)
                         detection.add_attribute("face_lighting", face_lighting_label, face_lighting_score)
+                        if self._gender_classifier is not None and person_crop.size > 0:
+                            try:
+                                gender_label, gender_score = self._gender_classifier.predict(person_crop)
+                                detection.add_attribute("gender", gender_label, gender_score)
+                            except Exception as gender_exc:
+                                self.get_logger().warn(
+                                    f"Gender classifier failed on person crop (skipped): {gender_exc}"
+                                )
                 
                 all_detections = yolo_detections + yellow_block_detections
 

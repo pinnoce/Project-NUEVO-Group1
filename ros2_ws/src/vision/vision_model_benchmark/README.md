@@ -185,6 +185,24 @@ python benchmark_ultralytics.py --model yolo26s_ncnn_model --source /dev/video10
 
 Only keep the Small model if it still passes the CPU/FPS target.
 
+## Classification Models (`classify_live.py`)
+
+For YOLO-cls models (e.g. the gender classifier shipped in
+`ros2_ws/src/vision/data/gender_cls_ncnn/`), use `classify_live.py` instead of
+`live_detect.py`. It prints the top-k class label + confidence per tick.
+
+```bash
+python classify_live.py --model male_female_id_weights.pt --source /dev/video10 --imgsz 224
+# or against a single image:
+python classify_live.py --model male_female_id_weights.pt --image path/to/face.jpg
+# write the latest annotated frame to a file (any image viewer with auto-refresh works):
+python classify_live.py --model male_female_id_weights.pt --source /dev/video10 --imgsz 224 --save-latest /tmp/classify_latest.jpg
+```
+
+After sanity-checking the `.pt`, export to NCNN with `export_model.py
+--format ncnn --imgsz 224` and move the resulting `<name>_ncnn_model/` folder
+into `ros2_ws/src/vision/data/`.
+
 ## Notes
 
 - Do not commit downloaded `.pt` weights or exported model folders.
