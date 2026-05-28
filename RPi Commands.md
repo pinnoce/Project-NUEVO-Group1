@@ -22,10 +22,10 @@ Grabs new commits from our own GitHub remote (not from `upstream/main`).
 
 ### 2. Start the docker container
 ```bash
-docker compose -f $COMPOSE up -d --wait
+docker compose -f $COMPOSE up -d
 ```
 - `-d` runs in the background.
-- `--wait` blocks until the healthcheck passes (container is up, workspace is built, bridge is running). First-ever start takes ~60s because colcon has to build; subsequent starts are ~5s.
+- Add `--wait` (i.e. `up -d --wait`) if you want the command to block until the healthcheck passes — useful in scripts. First-ever start takes ~60s because colcon has to build; subsequent starts are ~5s.
 - The container auto-runs `ros2 launch bridge bridge.launch.py` as its main process, so the **bridge is already running** after this command finishes. You do NOT need to start the bridge manually.
 
 If you also want to watch the bridge logs scroll by:
@@ -143,5 +143,61 @@ sudo ./ros2_ws/setup_rpi.sh                              # enables UART, install
 - **Trying to run the bridge manually.** The container's main process is already `ros2 launch bridge bridge.launch.py`. Running it again will collide.
 - **`ros2 launch` can't find a new launch file.** Restart the container so colcon installs it: `./ros2_ws/docker/restart.sh`.
 - **`/tag_detections` has zero publishers.** The `robot_gps` node isn't running. Start it with `ros2 run sensors robot_gps`, or just use `ros2 launch robot everything.launch.py`.
+- **`vision_node` stuck on `Waiting for camera device /dev/video10`.** The `pi-camera-feed` systemd service can't find the `v4l2loopback` kernel module — usually because the kernel was upgraded and DKMS didn't rebuild it for the new version. See *Camera feed / `/dev/video10` missing* below.
+
+---
+
+## Camera feed / `/dev/video10` missing
+
+The Pi camera reaches ROS via `pi-camera-feed.service` → `rpicam-vid` → `ffmpeg` → `v4l2loopback` (`/dev/video10`). If `/dev/video10` doesn't exist or the service is stuck restarting:
+
+```bash
+systemctl status pi-camera-feed.service --no-pager
+journalctl -u pi-camera-feed.service --no-pager -n 20
+```
+
+If the journal shows `modprobe: FATAL: Module v4l2loopback not found in directory /lib/modules/<kernel>`, DKMS lost the module on a kernel upgrade. Install the matching headers and rebuild:
+
+```bash
+sudo apt-get install -y linux-headers-$(uname -r) \
+  && sudo dkms autoinstall \
+  && sudo systemctl restart pi-camera-feed.service \
+  && sleep 3 && ls -la /dev/video10
+```
+
+`/dev/video10` should appear as `crw-rw---- 1 root video …`.
+
+---
+
+## Inspecting runtime output from the host
+
+Per-package state (lidar plots, vision overlays, logs) is written to `/runtime_output/<pkg>/…` *inside* the container. To view from the host without entering the container:
+
+```bash
+# Latest lidar body-frame plot
+docker cp docker-ros2_runtime-1:/runtime_output/lidar/latest.png /tmp/lidar_latest.png
+xdg-open /tmp/lidar_latest.png      # or any image viewer
+
+# Latest vision debug frame
+docker cp docker-ros2_runtime-1:/runtime_output/vision/latest.jpg /tmp/vision_latest.jpg
+```
+
+Auto-refreshing viewer (handy while tuning):
+```bash
+feh --reload 1 /tmp/lidar_latest.png   # re-copy in a loop or use --watch
+```
+
+---
+
+## Quick ROS2 diagnostics (from inside the container)
+
+| Question | Command |
+|---|---|
+| What nodes are alive? | `ros2 node list` |
+| What's on a topic? | `ros2 topic echo /vision/detections` (Ctrl-C to stop) |
+| Is `/scan` actually publishing? | `ros2 topic hz /scan --window 10` |
+| What params does a node expose? | `ros2 param list /vision_node` |
+| Tune a param live without restart | `ros2 param set /vision_node gender_female_threshold 0.4` |
+| Trigger a one-off TF lookup | `ros2 run tf2_ros tf2_echo base_link laser_frame` |
 
 ---
