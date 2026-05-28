@@ -173,15 +173,21 @@ GRIPPER_SETTLE_S           = 0.8
 
 # === Vertical lift (stepper on shaft) ===
 LIFT_STEPPER             = Stepper.STEPPER_1
-LIFT_RAISE_TO_CARRY_AT_STARTUP = False  # if True, lift moves to LIFT_CARRY_STEPS at start_robot
+LIFT_DIR_INVERTED        = True   # firmware step counts positive = down; flip so positive LIFT_*_STEPS raise the lift
+LIFT_RAISE_TO_CARRY_AT_STARTUP = True  # if True, lift moves to LIFT_CARRY_STEPS at start_robot
 LIFT_MAX_VELOCITY        = 2000
 LIFT_ACCELERATION        = 400
 LIFT_MOVE_TIMEOUT_S      = 12.0
 
+
+def lift_steps_signed(value: int) -> int:
+    """Apply LIFT_DIR_INVERTED so positive LIFT_*_STEPS always means above the shelf."""
+    return -int(value) if LIFT_DIR_INVERTED else int(value)
+
 # Edit these to match your bun + patty geometry. Step 0 = shelf surface.
 BUN_HEIGHT_STEPS         = 10000    # height of one bun, in stepper steps
 PATTY_HEIGHT_STEPS       = 10000    # height of one patty, in stepper steps
-LIFT_CARRY_STEPS         = 0   # safe travel height above the shelf — clears the tallest item
+LIFT_CARRY_STEPS         = 20000   # safe travel height above the shelf — clears the tallest item
 
 # Per-action lift targets (override directly if the derived defaults don't fit).
 # 0 = gripper at shelf surface; positive = raised above the shelf.
@@ -323,7 +329,7 @@ def prime_lift(robot: Robot) -> bool:
     robot.step_enable(LIFT_STEPPER)
     if not robot.step_move(
         LIFT_STEPPER,
-        steps=LIFT_CARRY_STEPS,
+        steps=lift_steps_signed(LIFT_CARRY_STEPS),
         move_type=StepMoveType.ABSOLUTE,
         blocking=True,
         timeout=LIFT_MOVE_TIMEOUT_S,
@@ -580,7 +586,7 @@ def run_manipulation_actions(robot: Robot, actions) -> bool:
 
         if not robot.step_move(
             LIFT_STEPPER,
-            steps=int(lift_steps),
+            steps=lift_steps_signed(lift_steps),
             move_type=StepMoveType.ABSOLUTE,
             blocking=True,
             timeout=LIFT_MOVE_TIMEOUT_S,
@@ -593,7 +599,7 @@ def run_manipulation_actions(robot: Robot, actions) -> bool:
 
         if not robot.step_move(
             LIFT_STEPPER,
-            steps=int(LIFT_CARRY_STEPS),
+            steps=lift_steps_signed(LIFT_CARRY_STEPS),
             move_type=StepMoveType.ABSOLUTE,
             blocking=True,
             timeout=LIFT_MOVE_TIMEOUT_S,
