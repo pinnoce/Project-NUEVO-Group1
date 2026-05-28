@@ -30,13 +30,25 @@ class GenderNcnnClassifier:
         model_path: str | Path,
         input_size: int = 224,
         ncnn_threads: int = 0,
+        female_threshold: float = 0.3, # lower this to make "female" stickier against frame-to-frame jitter; raise to require more confidence
     ) -> None:
         self.model_path = Path(model_path).expanduser()
         self.input_size = int(input_size)
         self.ncnn_threads = int(ncnn_threads)
+        # Decision threshold on P(female). >= threshold → female, else male.
+        # Default 0.5 reproduces pure argmax. Lower to make "female" stickier
+        # against frame-to-frame jitter; raise to require more confidence.
+        self.female_threshold = float(female_threshold)
 
         metadata = _load_ultralytics_metadata(self.model_path / "metadata.yaml")
         self.raw_names = metadata["names"]
+        # Resolve which output index corresponds to "female" so the threshold
+        # is applied to the right probability regardless of model export order.
+        self._female_index = next(
+            (idx for idx, name in self.raw_names.items()
+             if GENDER_LABEL_MAP.get(str(name), str(name)) == "female"),
+            None,
+        )
 
         param_path = self.model_path / "model.ncnn.param"
         bin_path = self.model_path / "model.ncnn.bin"
@@ -82,10 +94,20 @@ class GenderNcnnClassifier:
         if probs.size == 0:
             return ("unknown", 0.0)
 
-        top_index = int(np.argmax(probs))
-        raw_label = str(self.raw_names.get(top_index, f"class_{top_index}"))
+        if self._female_index is not None and self._female_index < probs.size:
+            prob_female = float(probs[self._female_index])
+            if prob_female >= self.female_threshold:
+                chosen_index = self._female_index
+            else:
+                chosen_index = next(
+                    (idx for idx in range(probs.size) if idx != self._female_index),
+                    int(np.argmax(probs)),
+                )
+        else:
+            chosen_index = int(np.argmax(probs))
+        raw_label = str(self.raw_names.get(chosen_index, f"class_{chosen_index}"))
         label = GENDER_LABEL_MAP.get(raw_label, raw_label)
-        return (label, float(probs[top_index]))
+        return (label, float(probs[chosen_index]))
 
 
 def _resize_shortest_edge_then_center_crop(image_bgr: np.ndarray, size: int) -> np.ndarray:

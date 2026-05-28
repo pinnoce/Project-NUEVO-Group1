@@ -78,6 +78,7 @@ class VisionNode(Node):
             str(default_model_path(self._source_data_dir, self._share_data_dir, "gender_cls_ncnn")),
         )
         self.declare_parameter("gender_model_imgsz", 224)
+        self.declare_parameter("gender_female_threshold", 0.3)
         self.declare_parameter("confidence_threshold", 0.25)
         self.declare_parameter("iou_threshold", 0.7)
         self.declare_parameter("max_detections", 20)
@@ -157,6 +158,7 @@ class VisionNode(Node):
         )
 
         gender_model_imgsz = int(self.get_parameter("gender_model_imgsz").value)
+        gender_female_threshold = float(self.get_parameter("gender_female_threshold").value)
         self._gender_classifier: GenderNcnnClassifier | None = None
         try:
             gender_model_path = resolve_model_path(
@@ -168,9 +170,11 @@ class VisionNode(Node):
                 model_path=gender_model_path,
                 input_size=gender_model_imgsz,
                 ncnn_threads=self._ncnn_threads,
+                female_threshold=gender_female_threshold,
             )
             self.get_logger().info(
-                f"Loaded NCNN gender classifier path={gender_model_path} imgsz={gender_model_imgsz}"
+                f"Loaded NCNN gender classifier path={gender_model_path} imgsz={gender_model_imgsz} "
+                f"female_threshold={gender_female_threshold:.2f}"
             )
         except FileNotFoundError as exc:
             self.get_logger().warn(
