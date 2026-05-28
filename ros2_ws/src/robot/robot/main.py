@@ -105,14 +105,14 @@ GPS_TANGENT_MIN_DISPLACEMENT_MM = 50.0
 # ---------------------------------------------------------------------------
 
 PATH_CONTROL_POINTS = [
-    (0.0, 1100.0), # go traight next to patty
-    (0.0, 3350.0), # go straight to near end of lane
-    (410.0, 3350.0), # turn and go to next lane
-    (410.0, 630.0), # go straight (over ramp) to end of lane
-    (1210.0, 630.0), # turn and go to next lane
-    (1210.0, 3350.0), # go straight to near end of lane
-    (1710.0, 3350.0),
-    (1710.0, 600.0),
+    (0.0, 1130.0), # go traight next to patty
+    (0.0, 3400.0), # go straight to near end of lane
+    (430.0, 3400.0), # turn and go to next lane
+    (430.0, 500.0), # go straight (over ramp) to end of lane
+    (1210.0, 500.0), # turn and go to next lane
+    (1210.0, 3400.0), # go straight to near end of lane
+    (1710.0, 3400.0),
+    (1710.0, 500.0),
 ]
 
 # Split index: waypoints[:PATTY_PICKUP_WAYPOINT_INDEX+1] = initial path to patty
@@ -176,17 +176,52 @@ LIFT_STEPPER             = Stepper.STEPPER_1
 LIFT_DIR_INVERTED        = True   # firmware step counts positive = down; flip so positive LIFT_*_STEPS raise the lift
 LIFT_RAISE_TO_CARRY_AT_STARTUP = True  # if True, lift moves to LIFT_CARRY_STEPS at start_robot
 LIFT_MAX_VELOCITY        = 2000
-LIFT_ACCELERATION        = 400
-LIFT_MOVE_TIMEOUT_S      = 12.0
+LIFT_ACCELERATION        = 800
+LIFT_MOVE_TIMEOUT_S      = 20.0
 
 
 def lift_steps_signed(value: int) -> int:
     """Apply LIFT_DIR_INVERTED so positive LIFT_*_STEPS always means above the shelf."""
     return -int(value) if LIFT_DIR_INVERTED else int(value)
 
+
+# Logical lift position in Python-tracked steps. Boot/park = 0 = shelf surface.
+# Every move_lift_to() sends a RELATIVE delta keyed off this value, so the
+# firmware's absolute step count (which has no homing reference on this lift)
+# never matters.
+_LIFT_LOGICAL_STEPS: int = 0
+
+
+def move_lift_to(robot: Robot, target_steps: int, timeout: float = LIFT_MOVE_TIMEOUT_S) -> bool:
+    """Drive the lift to a logical step target using a RELATIVE move.
+
+    On success the tracked logical position is updated; on timeout it is left
+    as-is so the caller can detect the failure and abort.
+    """
+    global _LIFT_LOGICAL_STEPS
+    delta = int(target_steps) - _LIFT_LOGICAL_STEPS
+    signed = lift_steps_signed(delta)
+    expected_dir = "UP" if delta > 0 else ("DOWN" if delta < 0 else "no-op")
+    print(
+        f"[LIFT] move target={target_steps} current={_LIFT_LOGICAL_STEPS} "
+        f"delta={delta:+d} firmware_steps={signed:+d} expected={expected_dir}"
+    )
+    if delta == 0:
+        return True
+    ok = robot.step_move(
+        LIFT_STEPPER,
+        steps=signed,
+        move_type=StepMoveType.RELATIVE,
+        blocking=True,
+        timeout=timeout,
+    )
+    if ok:
+        _LIFT_LOGICAL_STEPS = int(target_steps)
+    return ok
+
 # Edit these to match your bun + patty geometry. Step 0 = shelf surface.
-BUN_HEIGHT_STEPS         = 10000    # height of one bun, in stepper steps
-PATTY_HEIGHT_STEPS       = 10000    # height of one patty, in stepper steps
+BUN_HEIGHT_STEPS         = 11000    # height of one bun, in stepper steps
+PATTY_HEIGHT_STEPS       = 11000    # height of one patty, in stepper steps
 LIFT_CARRY_STEPS         = 20000   # safe travel height above the shelf — clears the tallest item
 
 # Per-action lift targets (override directly if the derived defaults don't fit).
@@ -210,7 +245,15 @@ LIDAR_PLOT_XLIM_MM      = (-1500.0, 1500.0)
 LIDAR_PLOT_YLIM_MM      = (-500.0, 2500.0)
 
 # === Shelf approach (used after turning to face the shelf) ===
-SHELF_TURN_OFFSET_DEG        = 90.0    # +CCW: robot turns LEFT to face the shelf
+# Per-stop shelf-turn offset from travel_heading_deg (CCW positive). Tune each
+# entry independently — odometry drift can make a single offset misalign by
+# the 3rd or 4th shelf turn. Indices line up with BURGER_STOPS.
+SHELF_TURN_OFFSETS_DEG = [
+    98.0,   # 0: patty
+    97.0,   # 1: left_bun
+    97.0,   # 2: right_bun
+    93.0,   # 3: stack
+]
 SHELF_TURN_MAX_ANGULAR_RAD_S = 0.6
 SHELF_TURN_TOLERANCE_DEG     = 3.0
 SHELF_APPROACH_VEL_MM_S      = 40.0    # slow forward speed while reading lidar
@@ -226,12 +269,12 @@ SHELF_APPROACH_VEL_MM_S      = 40.0    # slow forward speed while reading lidar
 # Keep SHELF_STANDOFF_MM above that floor. To get closer to the shelf, lower
 # LIDAR_FILTER_MIN_MM (the RPLidar C1 reads down to ~50 mm).
 #
-LIDAR_FILTER_MIN_MM          = 30.0    # overrides hardware_map.LIDAR_RANGE_MIN_MM for this run
-SHELF_STANDOFF_MM            = 270.0   # stop when nearest forward point ≤ this
-SHELF_APPROACH_FOV_HALF_DEG  = 30.0    # half-angle of the forward cone to consider
-SHELF_APPROACH_MAX_DIST_MM   = 100.0   # safety cap on forward advance per approach
-SHELF_APPROACH_TIMEOUT_S     = 15.0
-RETREAT_FROM_SHELF_MM        = 500.0   # back away after manipulation
+LIDAR_FILTER_MIN_MM          = 25.0    # overrides hardware_map.LIDAR_RANGE_MIN_MM for this run
+SHELF_STANDOFF_MM            = 300.0   # stop when nearest forward point ≤ this
+SHELF_APPROACH_FOV_HALF_DEG  = 10.0    # half-angle of the forward cone to consider
+SHELF_APPROACH_MAX_DIST_MM   = 300.0   # safety cap on forward advance per approach
+SHELF_APPROACH_TIMEOUT_S     = 20.0
+RETREAT_FROM_SHELF_MM        = 150.0   # back away after manipulation
 
 # === Straight-line travel between stops (signed: + = forward, - = backward) ===
 TRAVEL_PATTY_TO_LEFT_BUN_MM     = -152.0   # back along travel heading to left bun
@@ -325,15 +368,9 @@ def prime_lift(robot: Robot) -> bool:
     carry height, and set the gripper open. Assumes the lift was parked at
     the bottom of the shaft before power-on.
     """
-    print("[BURGER] enabling lift stepper (no homing — using boot position as step 0)")
+    print("[BURGER] enabling lift stepper (no homing — using boot position as logical step 0)")
     robot.step_enable(LIFT_STEPPER)
-    if not robot.step_move(
-        LIFT_STEPPER,
-        steps=lift_steps_signed(LIFT_CARRY_STEPS),
-        move_type=StepMoveType.ABSOLUTE,
-        blocking=True,
-        timeout=LIFT_MOVE_TIMEOUT_S,
-    ):
+    if not move_lift_to(robot, LIFT_CARRY_STEPS):
         print("[warn] lift failed to reach carry height at startup")
         robot.step_disable(LIFT_STEPPER)
         return False
@@ -352,6 +389,11 @@ def reset_mission_pose(robot: Robot) -> None:
 def show_idle_leds(robot: Robot) -> None:
     robot.set_led(LED.ORANGE, 200)
     robot.set_led(LED.GREEN, 0)
+    if ENABLE_BURGER_ASSEMBLY:
+        # Re-enable the servo defensively — firmware disables all actuators on
+        # any drop to IDLE/ESTOP, which would silently swallow set_servo.
+        robot.enable_servo(GRIPPER_SERVO)
+        robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)
 
 
 def show_moving_leds(robot: Robot) -> None:
@@ -584,26 +626,14 @@ def run_manipulation_actions(robot: Robot, actions) -> bool:
 
         print(f"[BURGER] {descriptor} @ lift={lift_steps} steps")
 
-        if not robot.step_move(
-            LIFT_STEPPER,
-            steps=lift_steps_signed(lift_steps),
-            move_type=StepMoveType.ABSOLUTE,
-            blocking=True,
-            timeout=LIFT_MOVE_TIMEOUT_S,
-        ):
+        if not move_lift_to(robot, lift_steps):
             print(f"[warn] lift failed to reach {lift_steps} steps")
             return False
 
         robot.set_servo(GRIPPER_SERVO, gripper_target_deg)
         time.sleep(GRIPPER_SETTLE_S)
 
-        if not robot.step_move(
-            LIFT_STEPPER,
-            steps=lift_steps_signed(LIFT_CARRY_STEPS),
-            move_type=StepMoveType.ABSOLUTE,
-            blocking=True,
-            timeout=LIFT_MOVE_TIMEOUT_S,
-        ):
+        if not move_lift_to(robot, LIFT_CARRY_STEPS):
             print("[warn] lift failed to return to carry height")
             return False
 
@@ -765,11 +795,15 @@ def run(robot: Robot) -> None:
                         print(f"[BURGER] starting at stop {burger_idx} ({BURGER_STOPS[burger_idx][0]})")
                         print(
                             f"[BURGER] travel_heading={travel_heading_deg:.1f}°  "
-                            f"shelf_offset={SHELF_TURN_OFFSET_DEG:+.1f}°"
+                            f"shelf_offset={SHELF_TURN_OFFSETS_DEG[burger_idx]:+.1f}°"
                         )
+                        if not move_lift_to(robot, LIFT_CARRY_STEPS):
+                            abort_to_idle(robot, None, "lift failed to reach carry before shelf turn")
+                            state = "IDLE"
+                            continue
                         motion_handle = start_shelf_turn(
                             robot,
-                            travel_heading_deg + SHELF_TURN_OFFSET_DEG,
+                            travel_heading_deg + SHELF_TURN_OFFSETS_DEG[burger_idx],
                         )
                         state = "B_TURN_TO_SHELF"
 
@@ -906,10 +940,14 @@ def run(robot: Robot) -> None:
                         f"to stop {burger_idx} ({next_label})"
                     )
                     if travel_mm == 0.0:
-                        # No travel needed — go straight to turn-to-shelf.
+                        # No travel needed — raise to carry, then turn-to-shelf.
+                        if not move_lift_to(robot, LIFT_CARRY_STEPS):
+                            abort_to_idle(robot, None, "lift failed to reach carry before shelf turn")
+                            state = "IDLE"
+                            continue
                         motion_handle = start_shelf_turn(
                             robot,
-                            travel_heading_deg + SHELF_TURN_OFFSET_DEG,
+                            travel_heading_deg + SHELF_TURN_OFFSETS_DEG[burger_idx],
                         )
                         state = "B_TURN_TO_SHELF"
                     else:
@@ -923,9 +961,13 @@ def run(robot: Robot) -> None:
                 state = "IDLE"
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
+                if not move_lift_to(robot, LIFT_CARRY_STEPS):
+                    abort_to_idle(robot, None, "lift failed to reach carry before shelf turn")
+                    state = "IDLE"
+                    continue
                 motion_handle = start_shelf_turn(
                     robot,
-                    travel_heading_deg + SHELF_TURN_OFFSET_DEG,
+                    travel_heading_deg + SHELF_TURN_OFFSETS_DEG[burger_idx],
                 )
                 state = "B_TURN_TO_SHELF"
 
