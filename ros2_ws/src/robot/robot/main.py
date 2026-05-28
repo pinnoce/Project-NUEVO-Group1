@@ -72,7 +72,8 @@ TURN_TOLERANCE_DEG            = 3.0
 LOOK_TURN_MAX_ANGULAR_RAD_S   = 0.4    # slow look-left turn (~23°/s)
 RETURN_TURN_MAX_ANGULAR_RAD_S = 1.0    # default fast cap for turn-back
 VISION_STALE_SEC              = 3.0
-MIN_TRAFFIC_LIGHT_CONFIDENCE  = 0.50
+MIN_TRAFFIC_LIGHT_CONFIDENCE  = 0.50   # YOLO box confidence on the traffic-light detection itself
+MIN_GREEN_COLOR_CONFIDENCE    = 0.10   # green-blob-area / crop-area required to call it "green" — raise to reject ambient/reflected green
 
 
 # ---------------------------------------------------------------------------
@@ -425,15 +426,19 @@ def print_status(robot: Robot) -> None:
 
 
 def see_green_light(robot: Robot) -> bool:
-    """True if a green traffic-light detection passes the confidence floor."""
+    """True if a green traffic-light detection passes both the YOLO and color floors."""
     if not robot.is_vision_active(timeout_s=VISION_STALE_SEC):
         return False
     for detection in robot.get_detections("traffic light"):
         if float(detection["confidence"]) < MIN_TRAFFIC_LIGHT_CONFIDENCE:
             continue
-        color = detection.get("attributes", {}).get("color", {}).get("value")
-        if color == "green":
-            return True
+        color_attr = detection.get("attributes", {}).get("color", {})
+        if color_attr.get("value") != "green":
+            continue
+        color_score = color_attr.get("score")
+        if color_score is None or float(color_score) < MIN_GREEN_COLOR_CONFIDENCE:
+            continue
+        return True
     return False
 
 
@@ -686,7 +691,8 @@ def run(robot: Robot) -> None:
             print(
                 f"[CFG] look_heading={LOOK_HEADING_DEG:.1f}°  "
                 f"initial_heading={INITIAL_THETA_DEG:.1f}°  "
-                f"min_green_conf={MIN_TRAFFIC_LIGHT_CONFIDENCE:.2f}"
+                f"min_traffic_light_conf={MIN_TRAFFIC_LIGHT_CONFIDENCE:.2f}  "
+                f"min_green_color_conf={MIN_GREEN_COLOR_CONFIDENCE:.2f}"
             )
             if ENABLE_LIDAR:
                 print(
