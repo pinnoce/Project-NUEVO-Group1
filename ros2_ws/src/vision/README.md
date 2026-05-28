@@ -216,6 +216,7 @@ vision_node = Node(
             "iou_threshold": 0.7,
             "max_detections": 20,
             "ncnn_threads": 4,
+            "gender_female_threshold": 0.3,  # P(female) ≥ this → label = female; lower = stickier "female"
             "enable_rule_based_detection": True,
             "debug_save_enabled": True,
             "debug_output_dir": "/runtime_output/vision",

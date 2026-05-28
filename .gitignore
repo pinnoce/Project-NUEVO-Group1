@@ -122,6 +122,18 @@ env/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.pylint.d/
+# Jupyter
+.ipynb_checkpoints/
+# Coverage / profiling
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.prof
+*.lprof
 
 # ============================================
 # Documentation
@@ -154,6 +166,12 @@ $RECYCLE.BIN/
 # Linux
 *~
 .directory
+.fuse_hidden*
+.Trash-*
+
+# direnv (allow .envrc to be committed, ignore the local override + cache)
+.envrc.local
+.direnv/
 
 # ============================================
 # IDEs and Editors
@@ -179,6 +197,14 @@ $RECYCLE.BIN/
 
 # Sublime Text
 *.sublime-workspace
+
+# AI assistants / pair programmers — local sessions, not source
+.cursor/
+.continue/
+.windsurf/
+.aider*
+.codeium/
+.copilot*
 
 # ============================================
 # Secrets and Configuration
@@ -220,6 +246,17 @@ ros2_ws/src/lab_docs/
 test_data/
 logs/
 *.log
+
+# Docker compose local overrides (committed compose files only)
+docker-compose.override.yml
+docker-compose.override.yaml
+*.local.yml
+*.local.yaml
+
+# Local image / sanity-check dumps (the runtime_output dir is the canonical
+# place for in-container artifacts; this catches host-side ad-hoc dumps)
+/lidar_sanity/
+/vision_sanity/
 
 # TLV Type Generated Definitions
 # TLV_TypeDefs.h

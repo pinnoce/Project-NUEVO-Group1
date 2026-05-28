@@ -29,6 +29,9 @@ Default runtime parameters:
 - `camera_width`: `640`
 - `camera_height`: `480`
 - `debug_output_dir`: `/runtime_output/vision`
+- `gender_model_path`: exported NCNN model directory for the gender classifier
+- `gender_model_imgsz`: `224`
+- `gender_female_threshold`: `0.3` — `P(female) ≥` this means the person detection is labelled `female`, else `male`. Lowering the value makes the `female` label stickier against frame-to-frame jitter.
 
 Set `class_filter` to an empty string to publish all model classes:
 
