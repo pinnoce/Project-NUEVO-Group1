@@ -51,6 +51,14 @@ from robot.robot import FirmwareState, Robot
 from robot.util import densify_polyline  # noqa: F401 - optional helper for students
 
 
+# ===========================================================================
+# CONFIGURATION — tune the mission here.
+# Everything you'd normally edit lives in this top section, grouped by feature.
+# The implementation (helpers + FSM) is below the IMPLEMENTATION banner; you
+# rarely need to touch it.
+# ===========================================================================
+
+
 # ---------------------------------------------------------------------------
 # Sensor toggles — set True if the corresponding node is running
 # Hardware calibration (wheel geometry, lidar mount, tag offset) lives in
@@ -120,14 +128,32 @@ PATH_CONTROL_POINTS = [
 #              waypoints[PATTY_PICKUP_WAYPOINT_INDEX+1:] = continuation after burger
 PATTY_PICKUP_WAYPOINT_INDEX = 0
 
-INITIAL_PATH_CONTROL_POINTS = PATH_CONTROL_POINTS[: PATTY_PICKUP_WAYPOINT_INDEX + 1]
-CONTINUATION_PATH_CONTROL_POINTS = PATH_CONTROL_POINTS[PATTY_PICKUP_WAYPOINT_INDEX + 1 :]
+# Obstacle-avoidance segment (cones live here). The continuation after the
+# burger is driven in three legs:
+#   leg A  — pure pursuit from just past the patty up to AVOID_SEGMENT_START_INDEX
+#   LAPF   — leashed APF from there to AVOID_SEGMENT_GOAL_INDEX, steering around cones
+#   leg C  — pure pursuit through every remaining waypoint
+# Both indices are into PATH_CONTROL_POINTS, which stays the single source of truth.
+AVOID_SEGMENT_START_INDEX = 4   # (1210, 500)  — last waypoint pure-pursued before the cones
+AVOID_SEGMENT_GOAL_INDEX  = 5   # (1210, 3400) — LAPF goal at the far end of the cones
 
-# Optional: densify long segments for smoother tracking.
+INITIAL_PATH_CONTROL_POINTS = PATH_CONTROL_POINTS[: PATTY_PICKUP_WAYPOINT_INDEX + 1]
+CONTINUATION_LEG_A_CONTROL_POINTS = PATH_CONTROL_POINTS[
+    PATTY_PICKUP_WAYPOINT_INDEX + 1 : AVOID_SEGMENT_START_INDEX + 1
+]
+AVOID_GOAL_POINT = PATH_CONTROL_POINTS[AVOID_SEGMENT_GOAL_INDEX]
+CONTINUATION_LEG_C_CONTROL_POINTS = PATH_CONTROL_POINTS[AVOID_SEGMENT_GOAL_INDEX + 1 :]
+
+# Optional: densify long segments for smoother tracking. The LAPF goal is a
+# single point, so it is never densified.
 INITIAL_PATH_CONTROL_POINTS = densify_polyline(INITIAL_PATH_CONTROL_POINTS, spacing=50.0)
-if CONTINUATION_PATH_CONTROL_POINTS:
-    CONTINUATION_PATH_CONTROL_POINTS = densify_polyline(
-        CONTINUATION_PATH_CONTROL_POINTS, spacing=50.0
+if CONTINUATION_LEG_A_CONTROL_POINTS:
+    CONTINUATION_LEG_A_CONTROL_POINTS = densify_polyline(
+        CONTINUATION_LEG_A_CONTROL_POINTS, spacing=50.0
+    )
+if CONTINUATION_LEG_C_CONTROL_POINTS:
+    CONTINUATION_LEG_C_CONTROL_POINTS = densify_polyline(
+        CONTINUATION_LEG_C_CONTROL_POINTS, spacing=50.0
     )
 
 VELOCITY_MM_S      = 100.0
@@ -139,6 +165,34 @@ MAX_ANGULAR_RAD_S  = 0.8
 STATUS_PRINT_INTERVAL_S = 0.5
 
 LOOK_HEADING_DEG = INITIAL_THETA_DEG + LOOK_LEFT_OFFSET_DEG
+
+
+# ---------------------------------------------------------------------------
+# Obstacle avoidance (LAPF) configuration
+#
+# Used on the continuation leg from PATH_CONTROL_POINTS[AVOID_SEGMENT_START_INDEX]
+# to [AVOID_SEGMENT_GOAL_INDEX]. LAPF drives toward AVOID_GOAL_POINT while a
+# "virtual target" on a forward leash is pushed sideways by repulsion from
+# tracked obstacle disks. Those disks are built automatically from the lidar
+# scan (ENABLE_LIDAR must be True), so no extra sensor setup is needed.
+#
+# LAPF_LEASH_LENGTH_MM is drive-geometry dependent: ~400 mm for a front-wheel
+# drive base, ~50 mm for a rear-wheel drive base. This robot is REAR-wheel
+# drive, so the leash is short — retune if the chassis changes.
+# ---------------------------------------------------------------------------
+
+AVOID_VELOCITY_MM_S       = 60.0    # cautious forward speed through the cone field
+AVOID_TOLERANCE_MM        = 50.0    # goal-reached tolerance at the LAPF goal
+AVOID_MAX_ANGULAR_RAD_S   = 1.0
+
+LAPF_LEASH_LENGTH_MM      = 50.0    # rear-wheel drive → short leash
+LAPF_LEASH_HALF_ANGLE_DEG = 25.0    # forward cone the virtual target may steer within
+LAPF_REPULSION_RANGE_MM   = 300.0   # surface air-gap at which a cone starts repelling
+LAPF_REPULSION_GAIN       = 550.0
+LAPF_ATTRACTION_GAIN      = 1.0
+LAPF_TARGET_SPEED_MM_S    = 200.0   # virtual-target sim speed (NOT the robot's drive speed)
+LAPF_FORCE_EMA_ALPHA      = 0.35
+LAPF_INFLATION_MARGIN_MM  = 150.0   # extra radius added to each cone before repulsion
 
 
 # ---------------------------------------------------------------------------
@@ -179,46 +233,6 @@ LIFT_RAISE_TO_CARRY_AT_STARTUP = True  # if True, lift moves to LIFT_CARRY_STEPS
 LIFT_MAX_VELOCITY        = 2000
 LIFT_ACCELERATION        = 800
 LIFT_MOVE_TIMEOUT_S      = 20.0
-
-
-def lift_steps_signed(value: int) -> int:
-    """Apply LIFT_DIR_INVERTED so positive LIFT_*_STEPS always means above the shelf."""
-    return -int(value) if LIFT_DIR_INVERTED else int(value)
-
-
-# Logical lift position in Python-tracked steps. Boot/park = 0 = shelf surface.
-# Every move_lift_to() sends a RELATIVE delta keyed off this value, so the
-# firmware's absolute step count (which has no homing reference on this lift)
-# never matters.
-_LIFT_LOGICAL_STEPS: int = 0
-
-
-def move_lift_to(robot: Robot, target_steps: int, timeout: float = LIFT_MOVE_TIMEOUT_S) -> bool:
-    """Drive the lift to a logical step target using a RELATIVE move.
-
-    On success the tracked logical position is updated; on timeout it is left
-    as-is so the caller can detect the failure and abort.
-    """
-    global _LIFT_LOGICAL_STEPS
-    delta = int(target_steps) - _LIFT_LOGICAL_STEPS
-    signed = lift_steps_signed(delta)
-    expected_dir = "UP" if delta > 0 else ("DOWN" if delta < 0 else "no-op")
-    print(
-        f"[LIFT] move target={target_steps} current={_LIFT_LOGICAL_STEPS} "
-        f"delta={delta:+d} firmware_steps={signed:+d} expected={expected_dir}"
-    )
-    if delta == 0:
-        return True
-    ok = robot.step_move(
-        LIFT_STEPPER,
-        steps=signed,
-        move_type=StepMoveType.RELATIVE,
-        blocking=True,
-        timeout=timeout,
-    )
-    if ok:
-        _LIFT_LOGICAL_STEPS = int(target_steps)
-    return ok
 
 # Edit these to match your bun + patty geometry. Step 0 = shelf surface.
 BUN_HEIGHT_STEPS         = 11000    # height of one bun, in stepper steps
@@ -299,6 +313,52 @@ BURGER_STOPS = [
         ("pick",  LIFT_STACK_PICK_STEPS, GRIPPER_CLOSE_BUN_DEG),   # full bun+patty+bun stack
     ]),
 ]
+
+
+# ===========================================================================
+# IMPLEMENTATION — logic below. Tune behavior via the constants above; you
+# normally don't need to edit past this banner.
+# ===========================================================================
+
+
+# --- Lift state model (no limit switch — see the burger config header) ---
+# Logical lift position in Python-tracked steps. Boot/park = 0 = shelf surface.
+# Every move_lift_to() sends a RELATIVE delta keyed off this value, so the
+# firmware's absolute step count (which has no homing reference) never matters.
+_LIFT_LOGICAL_STEPS: int = 0
+
+
+def lift_steps_signed(value: int) -> int:
+    """Apply LIFT_DIR_INVERTED so positive LIFT_*_STEPS always means above the shelf."""
+    return -int(value) if LIFT_DIR_INVERTED else int(value)
+
+
+def move_lift_to(robot: Robot, target_steps: int, timeout: float = LIFT_MOVE_TIMEOUT_S) -> bool:
+    """Drive the lift to a logical step target using a RELATIVE move.
+
+    On success the tracked logical position is updated; on timeout it is left
+    as-is so the caller can detect the failure and abort.
+    """
+    global _LIFT_LOGICAL_STEPS
+    delta = int(target_steps) - _LIFT_LOGICAL_STEPS
+    signed = lift_steps_signed(delta)
+    expected_dir = "UP" if delta > 0 else ("DOWN" if delta < 0 else "no-op")
+    print(
+        f"[LIFT] move target={target_steps} current={_LIFT_LOGICAL_STEPS} "
+        f"delta={delta:+d} firmware_steps={signed:+d} expected={expected_dir}"
+    )
+    if delta == 0:
+        return True
+    ok = robot.step_move(
+        LIFT_STEPPER,
+        steps=signed,
+        move_type=StepMoveType.RELATIVE,
+        blocking=True,
+        timeout=timeout,
+    )
+    if ok:
+        _LIFT_LOGICAL_STEPS = int(target_steps)
+    return ok
 
 
 def configure_robot(robot: Robot) -> None:
@@ -470,6 +530,38 @@ def cancel_handle(handle) -> None:
     handle.wait(timeout=1.0)
 
 
+def start_lapf_goal(robot: Robot, goal_xy):
+    """Start a non-blocking leashed-APF run toward goal_xy (world frame)."""
+    return robot.lapf_to_goal(
+        goal_xy[0],
+        goal_xy[1],
+        velocity=AVOID_VELOCITY_MM_S,
+        tolerance=AVOID_TOLERANCE_MM,
+        leash_length_mm=LAPF_LEASH_LENGTH_MM,
+        repulsion_range_mm=LAPF_REPULSION_RANGE_MM,
+        target_speed_mm_s=LAPF_TARGET_SPEED_MM_S,
+        max_angular_rad_s=AVOID_MAX_ANGULAR_RAD_S,
+        repulsion_gain=LAPF_REPULSION_GAIN,
+        attraction_gain=LAPF_ATTRACTION_GAIN,
+        force_ema_alpha=LAPF_FORCE_EMA_ALPHA,
+        inflation_margin_mm=LAPF_INFLATION_MARGIN_MM,
+        leash_half_angle_deg=LAPF_LEASH_HALF_ANGLE_DEG,
+        blocking=False,
+    )
+
+
+def print_avoid_status(robot: Robot) -> None:
+    """Status line for the LAPF leg: pose, leashed virtual target, tracked cones."""
+    x, y, theta = robot.get_pose()
+    vt = robot.get_virtual_target()
+    tracks = robot.get_obstacle_tracks()
+    vt_str = f"vt=({vt[0]:6.0f}, {vt[1]:6.0f}) mm" if vt is not None else "vt=(none)"
+    print(
+        f"  pos=({x:6.0f}, {y:6.0f}) mm  θ={theta:5.1f}°  {vt_str}  "
+        f"tracked_cones={len(tracks)}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Burger assembly helpers
 # ---------------------------------------------------------------------------
@@ -499,19 +591,24 @@ _LIDAR_PLOT_FIG = None
 _LIDAR_PLOT_AX = None
 
 
-def save_lidar_plot(robot: Robot, path: str = LIDAR_PLOT_PATH) -> bool:
+def save_lidar_plot(robot: Robot, path: str = LIDAR_PLOT_PATH, lapf_overlay: bool = False) -> bool:
     """
     Render the current lidar obstacle cloud in body frame to a PNG.
     Body frame: +x = forward, +y = left. The plot maps body +y onto matplotlib
     X (inverted) and body +x onto matplotlib Y, so the figure reads like a
     top-down view with the robot facing UP and its LEFT side on the LEFT.
+
+    When lapf_overlay is True (the AVOID_LAPF leg), the shelf-approach
+    annotations are replaced with the things LAPF actually reasons about:
+    the tracked obstacle disks with their inflation/repulsion rings, the
+    leashed virtual target, and the goal — all transformed world → body frame.
     """
     global _LIDAR_PLOT_FIG, _LIDAR_PLOT_AX
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from matplotlib.patches import Wedge
+        from matplotlib.patches import Circle
     except ImportError:
         return False
 
@@ -531,41 +628,88 @@ def save_lidar_plot(robot: Robot, path: str = LIDAR_PLOT_PATH) -> bool:
     ax.scatter([LIDAR_MOUNT_Y_MM], [LIDAR_MOUNT_X_MM], s=50, c="blue",
                marker="^", label="lidar mount")
 
-    # Forward cone (the same arc closest_forward_obstacle_mm filters by).
-    # Endpoint in body frame: (cos(±h), sin(±h)) · cone_len. Mapped to
-    # matplotlib: X = body_y = cone_len * sin(±h), Y = body_x = cone_len * cos(±h).
-    cone_len = max(LIDAR_PLOT_YLIM_MM[1], 1500.0)
-    half_rad = math.radians(SHELF_APPROACH_FOV_HALF_DEG)
-    ax.plot([0.0, cone_len * math.sin(-half_rad)],
-            [0.0, cone_len * math.cos(-half_rad)],
-            "g--", alpha=0.5)
-    ax.plot([0.0, cone_len * math.sin(+half_rad)],
-            [0.0, cone_len * math.cos(+half_rad)],
-            "g--", alpha=0.5, label=f"forward cone ±{SHELF_APPROACH_FOV_HALF_DEG:.0f}°")
+    if lapf_overlay:
+        # LAPF view: what the planner actually reasons about. Tracked disks,
+        # the virtual target, and the goal live in WORLD frame, so transform
+        # each into body frame before mapping to plot axes (plot X = body_y,
+        # plot Y = body_x). body = R(-theta) · (world - pose).
+        px, py, ptheta_deg = robot.get_pose()
+        ptheta = math.radians(ptheta_deg)
+        cos_t = math.cos(ptheta)
+        sin_t = math.sin(ptheta)
 
-    # Standoff threshold — close_enough triggers when min forward body-x ≤ this.
-    ax.axhline(y=SHELF_STANDOFF_MM, color="orange", linestyle=":", alpha=0.8,
-               label=f"standoff {SHELF_STANDOFF_MM:.0f} mm")
+        def world_to_body(wx, wy):
+            dx = float(wx) - px
+            dy = float(wy) - py
+            body_x = cos_t * dx + sin_t * dy   # forward
+            body_y = -sin_t * dx + cos_t * dy  # left
+            return body_x, body_y
 
-    # Lidar near-range floor in body frame (= LIDAR_MOUNT_X_MM + LIDAR_FILTER_MIN_MM).
-    near_floor = LIDAR_MOUNT_X_MM + LIDAR_FILTER_MIN_MM
-    ax.axhline(y=near_floor, color="gray", linestyle=":", alpha=0.5,
-               label=f"lidar near floor {near_floor:.0f} mm")
+        first = True
+        for track in robot.get_obstacle_tracks():
+            bx, by = world_to_body(track["x"], track["y"])
+            radius = float(track.get("radius", 0.0))
+            # Disk centre at (plot X = by, plot Y = bx).
+            ax.add_patch(Circle((by, bx), max(radius, 20.0), fill=True,
+                                color="red", alpha=0.30,
+                                label="tracked cone" if first else None))
+            ax.add_patch(Circle((by, bx), radius + LAPF_INFLATION_MARGIN_MM,
+                                fill=False, color="orange", ls="--", alpha=0.6,
+                                label=f"inflation +{LAPF_INFLATION_MARGIN_MM:.0f}" if first else None))
+            ax.add_patch(Circle((by, bx), radius + LAPF_INFLATION_MARGIN_MM + LAPF_REPULSION_RANGE_MM,
+                                fill=False, color="gray", ls=":", alpha=0.4,
+                                label=f"repulsion +{LAPF_REPULSION_RANGE_MM:.0f}" if first else None))
+            first = False
 
-    # Annotate nearest forward distance.
-    nearest_mm = closest_forward_obstacle_mm(robot)
-    if math.isfinite(nearest_mm):
-        ax.annotate(f"nearest forward = {nearest_mm:.0f} mm",
-                    xy=(0.02, 0.98), xycoords="axes fraction",
-                    ha="left", va="top", fontsize=9,
-                    bbox=dict(boxstyle="round", fc="white", alpha=0.8))
+        vt = robot.get_virtual_target()
+        if vt is not None:
+            vbx, vby = world_to_body(vt[0], vt[1])
+            ax.scatter([vby], [vbx], s=80, c="magenta", marker="*",
+                       zorder=6, label="virtual target")
+
+        gbx, gby = world_to_body(AVOID_GOAL_POINT[0], AVOID_GOAL_POINT[1])
+        ax.scatter([gby], [gbx], s=90, c="green", marker="X",
+                   zorder=6, label="goal")
+
+        title = "LAPF avoidance (body frame)"
+    else:
+        # Forward cone (the same arc closest_forward_obstacle_mm filters by).
+        # Endpoint in body frame: (cos(±h), sin(±h)) · cone_len. Mapped to
+        # matplotlib: X = body_y = cone_len * sin(±h), Y = body_x = cone_len * cos(±h).
+        cone_len = max(LIDAR_PLOT_YLIM_MM[1], 1500.0)
+        half_rad = math.radians(SHELF_APPROACH_FOV_HALF_DEG)
+        ax.plot([0.0, cone_len * math.sin(-half_rad)],
+                [0.0, cone_len * math.cos(-half_rad)],
+                "g--", alpha=0.5)
+        ax.plot([0.0, cone_len * math.sin(+half_rad)],
+                [0.0, cone_len * math.cos(+half_rad)],
+                "g--", alpha=0.5, label=f"forward cone ±{SHELF_APPROACH_FOV_HALF_DEG:.0f}°")
+
+        # Standoff threshold — close_enough triggers when min forward body-x ≤ this.
+        ax.axhline(y=SHELF_STANDOFF_MM, color="orange", linestyle=":", alpha=0.8,
+                   label=f"standoff {SHELF_STANDOFF_MM:.0f} mm")
+
+        # Lidar near-range floor in body frame (= LIDAR_MOUNT_X_MM + LIDAR_FILTER_MIN_MM).
+        near_floor = LIDAR_MOUNT_X_MM + LIDAR_FILTER_MIN_MM
+        ax.axhline(y=near_floor, color="gray", linestyle=":", alpha=0.5,
+                   label=f"lidar near floor {near_floor:.0f} mm")
+
+        # Annotate nearest forward distance.
+        nearest_mm = closest_forward_obstacle_mm(robot)
+        if math.isfinite(nearest_mm):
+            ax.annotate(f"nearest forward = {nearest_mm:.0f} mm",
+                        xy=(0.02, 0.98), xycoords="axes fraction",
+                        ha="left", va="top", fontsize=9,
+                        bbox=dict(boxstyle="round", fc="white", alpha=0.8))
+
+        title = "Lidar (body frame)"
 
     ax.set_xlim(*LIDAR_PLOT_XLIM_MM)
     ax.set_ylim(*LIDAR_PLOT_YLIM_MM)
     ax.invert_xaxis()  # body +y = robot LEFT → render on left side of figure
     ax.set_xlabel("body y  (+y = robot LEFT)  [mm]")
     ax.set_ylabel("body x  (+x = robot FORWARD)  [mm]")
-    ax.set_title("Lidar (body frame)")
+    ax.set_title(title)
     ax.set_aspect("equal")
     ax.grid(alpha=0.3)
     ax.legend(loc="upper right", fontsize=8)
@@ -676,7 +820,7 @@ def run(robot: Robot) -> None:
 
         if (ENABLE_LIDAR_PLOT and ENABLE_LIDAR
                 and (now - last_lidar_plot_at) >= lidar_plot_period_s):
-            save_lidar_plot(robot)
+            save_lidar_plot(robot, lapf_overlay=(state == "AVOID_LAPF"))
             last_lidar_plot_at = now
 
         if state == "INIT":
@@ -705,6 +849,15 @@ def run(robot: Robot) -> None:
                         f"[CFG] lidar plot → {LIDAR_PLOT_PATH} @ {LIDAR_PLOT_HZ:.1f} Hz "
                         f"(open with feh --reload 1, or any auto-refreshing viewer)"
                     )
+                print(
+                    f"[CFG] avoid: LAPF leg idx {AVOID_SEGMENT_START_INDEX}→{AVOID_SEGMENT_GOAL_INDEX} "
+                    f"goal={AVOID_GOAL_POINT}  vel={AVOID_VELOCITY_MM_S:.0f} mm/s  "
+                    f"leash={LAPF_LEASH_LENGTH_MM:.0f} mm  rep_range={LAPF_REPULSION_RANGE_MM:.0f} mm  "
+                    f"inflation={LAPF_INFLATION_MARGIN_MM:.0f} mm"
+                )
+            else:
+                print("[warn] obstacle avoidance leg needs lidar — ENABLE_LIDAR is False; "
+                      "LAPF will see no cones")
             if ENABLE_GPS:
                 print(
                     f"[CFG] gps tag_id={TAG_ID}  "
@@ -923,21 +1076,21 @@ def run(robot: Robot) -> None:
                 motion_handle = None
                 burger_idx += 1
                 if burger_idx >= len(BURGER_STOPS):
-                    # Burger built — start continuation pure pursuit (if any).
-                    if CONTINUATION_PATH_CONTROL_POINTS:
+                    # Burger built — start the continuation: pure-pursuit leg A,
+                    # then LAPF through the cones, then pure-pursuit leg C.
+                    if CONTINUATION_LEG_A_CONTROL_POINTS:
                         print(
-                            f"[BURGER] complete — starting continuation path "
-                            f"({len(CONTINUATION_PATH_CONTROL_POINTS)} waypoints)"
+                            f"[BURGER] complete — continuation leg A "
+                            f"({len(CONTINUATION_LEG_A_CONTROL_POINTS)} waypoints) to avoidance start"
                         )
-                        motion_handle = start_path(robot, CONTINUATION_PATH_CONTROL_POINTS)
+                        motion_handle = start_path(robot, CONTINUATION_LEG_A_CONTROL_POINTS)
                         last_status_print_at = now
-                        state = "CONTINUATION"
+                        state = "CONTINUATION_A"
                     else:
-                        robot.stop()
-                        show_idle_leds(robot)
-                        print("[BURGER] complete — no continuation path configured")
-                        print("[FSM] IDLE — press BTN_1 to run again")
-                        state = "IDLE"
+                        print(f"[BURGER] complete — LAPF avoidance to goal {AVOID_GOAL_POINT}")
+                        motion_handle = start_lapf_goal(robot, AVOID_GOAL_POINT)
+                        last_status_print_at = now
+                        state = "AVOID_LAPF"
                 else:
                     next_label, travel_mm, _ = BURGER_STOPS[burger_idx]
                     direction = "forward" if travel_mm >= 0.0 else "backward"
@@ -977,9 +1130,9 @@ def run(robot: Robot) -> None:
                 )
                 state = "B_TURN_TO_SHELF"
 
-        elif state == "CONTINUATION":
+        elif state == "CONTINUATION_A":
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, "continuation path cancelled")
+                abort_to_idle(robot, motion_handle, "continuation leg A cancelled")
                 motion_handle = None
                 state = "IDLE"
             else:
@@ -987,7 +1140,58 @@ def run(robot: Robot) -> None:
                     print_status(robot)
                     last_status_print_at = now
                 if motion_handle is not None and motion_handle.is_finished():
-                    print("[FSM] DONE — continuation path complete")
+                    print("[FSM] leg A complete — starting LAPF obstacle avoidance")
+                    print_status(robot)
+                    motion_handle = None
+                    robot.stop()
+                    print(
+                        f"[AVOID] LAPF to goal {AVOID_GOAL_POINT}  "
+                        f"vel={AVOID_VELOCITY_MM_S:.0f} mm/s  leash={LAPF_LEASH_LENGTH_MM:.0f} mm  "
+                        f"rep_range={LAPF_REPULSION_RANGE_MM:.0f} mm  inflation={LAPF_INFLATION_MARGIN_MM:.0f} mm"
+                    )
+                    motion_handle = start_lapf_goal(robot, AVOID_GOAL_POINT)
+                    last_status_print_at = now
+                    state = "AVOID_LAPF"
+
+        elif state == "AVOID_LAPF":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "LAPF avoidance cancelled")
+                motion_handle = None
+                state = "IDLE"
+            else:
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_avoid_status(robot)
+                    last_status_print_at = now
+                if motion_handle is not None and motion_handle.is_finished():
+                    print("[FSM] LAPF avoidance complete")
+                    print_avoid_status(robot)
+                    motion_handle = None
+                    robot.stop()
+                    if CONTINUATION_LEG_C_CONTROL_POINTS:
+                        print(
+                            f"[FSM] CONTINUATION_C — {len(CONTINUATION_LEG_C_CONTROL_POINTS)} "
+                            f"waypoints to finish"
+                        )
+                        motion_handle = start_path(robot, CONTINUATION_LEG_C_CONTROL_POINTS)
+                        last_status_print_at = now
+                        state = "CONTINUATION_C"
+                    else:
+                        show_idle_leds(robot)
+                        print("[FSM] DONE — no leg-C waypoints")
+                        print("[FSM] IDLE — press BTN_1 to run again")
+                        state = "IDLE"
+
+        elif state == "CONTINUATION_C":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "continuation leg C cancelled")
+                motion_handle = None
+                state = "IDLE"
+            else:
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
+                if motion_handle is not None and motion_handle.is_finished():
+                    print("[FSM] DONE — continuation complete")
                     print_status(robot)
                     motion_handle = None
                     robot.stop()
