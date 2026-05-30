@@ -78,10 +78,10 @@ TAG_ID = 15  # IMPORTANT: set to the ArUco marker ID on your robot
 LOOK_LEFT_OFFSET_DEG          = 35.0   # CCW offset from INITIAL_THETA_DEG
 TURN_TOLERANCE_DEG            = 3.0
 LOOK_TURN_MAX_ANGULAR_RAD_S   = 0.4    # slow look-left turn (~23°/s)
-RETURN_TURN_MAX_ANGULAR_RAD_S = 1.0    # default fast cap for turn-back
+RETURN_TURN_MAX_ANGULAR_RAD_S = 0.4    # default fast cap for turn-back
 VISION_STALE_SEC              = 3.0
 MIN_TRAFFIC_LIGHT_CONFIDENCE  = 0.50   # YOLO box confidence on the traffic-light detection itself
-MIN_GREEN_COLOR_CONFIDENCE    = 0.10   # green-blob-area / crop-area required to call it "green" — raise to reject ambient/reflected green
+MIN_GREEN_COLOR_CONFIDENCE    = 0.05   # green-blob-area / crop-area required to call it "green" — raise to reject ambient/reflected green
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ VELOCITY_MM_S      = 100.0
 LOOKAHEAD_MM       = 120.0
 TOLERANCE_MM       = 25.0
 ADVANCE_RADIUS_MM  = 80.0
-MAX_ANGULAR_RAD_S  = 0.8
+MAX_ANGULAR_RAD_S  = 1.0
 
 STATUS_PRINT_INTERVAL_S = 0.5
 
@@ -269,7 +269,7 @@ SHELF_TURN_OFFSETS_DEG = [
     97.0,   # 2: right_bun
     93.0,   # 3: stack
 ]
-SHELF_TURN_MAX_ANGULAR_RAD_S = 0.6
+SHELF_TURN_MAX_ANGULAR_RAD_S = 1.0
 SHELF_TURN_TOLERANCE_DEG     = 3.0
 SHELF_APPROACH_VEL_MM_S      = 40.0    # slow forward speed while reading lidar
 #
@@ -289,7 +289,7 @@ SHELF_STANDOFF_MM            = 300.0   # stop when nearest forward point ≤ thi
 SHELF_APPROACH_FOV_HALF_DEG  = 10.0    # half-angle of the forward cone to consider
 SHELF_APPROACH_MAX_DIST_MM   = 300.0   # safety cap on forward advance per approach
 SHELF_APPROACH_TIMEOUT_S     = 20.0
-RETREAT_FROM_SHELF_MM        = 150.0   # back away after manipulation
+RETREAT_FROM_SHELF_MM        = 75.0   # back away after manipulation
 
 # === Straight-line travel between stops (signed: + = forward, - = backward) ===
 TRAVEL_PATTY_TO_LEFT_BUN_MM     = -152.0   # back along travel heading to left bun
