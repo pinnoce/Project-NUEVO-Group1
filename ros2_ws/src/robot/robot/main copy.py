@@ -70,16 +70,6 @@ ENABLE_GPS   = False
 
 TAG_ID = 15  # IMPORTANT: set to the ArUco marker ID on your robot
 
-# ---------------------------------------------------------------------------
-# POST-LAPF TEST HARNESS
-# This copy of main.py is trimmed to ONLY exercise the after-LAPF sequence so
-# its parameters can be tuned in isolation. On BTN_1 the robot jumps straight
-# to ALIGN_WALL_1 (the look-left / watch-green / pure-pursuit / burger-assembly
-# mission is skipped). Place the robot where it would be at the LAPF goal,
-# roughly facing the wall it should square against, then press BTN_1.
-# ---------------------------------------------------------------------------
-TEST_SIMULATE_CARRY = True   # at test start, raise lift to carry + close gripper (as if holding the burger)
-
 
 # ---------------------------------------------------------------------------
 # Look-for-green configuration
@@ -371,24 +361,18 @@ BURGER_STOPS = [
 # RELATIVE (turn_to current_heading + measured error), so the absolute odometry
 # drift doesn't matter — we only ever rotate by the measured misalignment.
 # ---------------------------------------------------------------------------
-WALL_ALIGN_FOV_HALF_DEG      = 20.0    # half-angle of the forward cone of lidar points fit to the wall
-WALL_ALIGN_MAX_RANGE_MM      = 4000.0  # ignore lidar points farther than this when fitting the wall (lidar reaches 6000)
+WALL_ALIGN_FOV_HALF_DEG      = 40.0    # half-angle of the forward cone of lidar points fit to the wall
+WALL_ALIGN_MAX_RANGE_MM      = 2500.0  # ignore lidar points farther than this when fitting the wall
 WALL_ALIGN_MIN_POINTS        = 8       # need at least this many points to trust a wall fit
-WALL_ALIGN_MAX_THICKNESS     = 0.40    # reject non-wall fits: minor/major stddev ratio above this is "blobby"
+WALL_ALIGN_MAX_THICKNESS     = 0.20    # reject non-wall fits: minor/major stddev ratio above this is "blobby"
 WALL_ALIGN_TOLERANCE_DEG     = 1.5     # stop squaring once misalignment is within this
 WALL_ALIGN_MAX_ITERS         = 5       # max squaring rotations before accepting whatever we have
 WALL_ALIGN_TIMEOUT_S         = 8.0     # give up waiting for a usable wall fit after this (then proceed)
 WALL_ALIGN_MAX_ANGULAR_RAD_S = 0.6     # slow, careful squaring turns
-WALL_ALIGN_DEBUG             = True    # print throttled diagnostics explaining each failed wall fit
-
-# Relative turns taken after each wall squaring. CCW is positive, so a turn to
-# the RIGHT is negative. Tune these to match the circuit corners.
-TURN_RIGHT_1_DEG = -100.0   # after the 1st wall align (LAPF-goal wall → gender lane)
-TURN_RIGHT_2_DEG = -100.0   # after the 2nd wall align (gender wall → shelf lane)
 
 # "Drive forward to read gender" leg (between the two wall alignments).
 GENDER_FORWARD_VEL_MM_S      = 60.0
-WALL_STANDOFF_MM             = 150.0   # stop when the wall is this far from the LIDAR/robot front (NOT the wheel midpoint)
+WALL_STANDOFF_MM             = 100.0   # stop this far from the wall ahead before squaring again
 GENDER_FORWARD_MAX_DIST_MM   = 2500.0  # safety cap on the forward drive
 GENDER_FORWARD_TIMEOUT_S     = 30.0
 
@@ -404,7 +388,7 @@ GENDER_FORWARD_TIMEOUT_S     = 30.0
 # ---------------------------------------------------------------------------
 DROPOFF_TRAVEL_FEMALE_MM      = 2000.0 # forward distance to the female drop-off (tune on hardware)
 DROPOFF_TRAVEL_MALE_MM        = 2130.0 # forward distance to the male drop-off (male shelf is further down)
-DROPOFF_SHELF_TURN_OFFSET_DEG = 92.0   # CCW (left) turn from the travel heading to face the drop-off shelf
+DROPOFF_SHELF_TURN_OFFSET_DEG = 90.0   # CCW (left) turn from the travel heading to face the drop-off shelf
 LIFT_DROPOFF_PLACE_STEPS      = 0      # lift height at which the burger is released (0 = shelf surface)
 FINISH_TRAVEL_MM              = 0.0    # optional final forward to the lane end after drop-off (0 = stop at IDLE)
 
@@ -412,12 +396,11 @@ FINISH_TRAVEL_MM              = 0.0    # optional final forward to the lane end 
 # ---------------------------------------------------------------------------
 # Gender scan (runs during the GENDER_FORWARD leg).
 # Reads robot.get_detections("person")[i].attributes["gender"] (value "male"/
-# "female") from the vision node and stores the label of the most confident
-# person. The vision node's own `gender_female_threshold` already decides the
-# male/female label (it's tuned so "female" sticks), so we do NOT re-threshold
-# on the gender score here — we just trust the label it reports.
+# "female", plus a score) from the vision node and stores the first person whose
+# detection and gender confidences both clear the floors below.
 # ---------------------------------------------------------------------------
 MIN_PERSON_CONFIDENCE = 0.50   # YOLO box confidence floor on the person detection
+MIN_GENDER_CONFIDENCE = 0.50   # gender-attribute score floor before we trust the label
 
 
 # ===========================================================================
@@ -629,12 +612,10 @@ def see_green_light(robot: Robot) -> bool:
 
 
 def detect_person_gender(robot: Robot):
-    """Return (label, score) for the most confident person, or None.
+    """Return (label, score) for the most confident person whose gender passes
+    both the detection and gender-score floors, or None.
 
-    label is "male"/"female" as decided by the vision node's gender classifier
-    (its gender_female_threshold already makes "female" sticky). We do not
-    re-threshold on the gender score — we just take the highest-confidence
-    person that clears the YOLO box floor and trust its reported label.
+    label is "male"/"female" as remapped by the vision node's gender classifier.
     """
     if not robot.is_vision_active(timeout_s=VISION_STALE_SEC):
         return None
@@ -644,10 +625,12 @@ def detect_person_gender(robot: Robot):
             continue
         gender_attr = detection.get("attributes", {}).get("gender", {})
         label = gender_attr.get("value")
-        if not label:
-            continue
         score = gender_attr.get("score")
-        score = float(score) if score is not None else 0.0
+        if not label or score is None:
+            continue
+        score = float(score)
+        if score < MIN_GENDER_CONFIDENCE:
+            continue
         if best is None or score > best[1]:
             best = (label, score)
     return best
@@ -667,46 +650,23 @@ def select_dropoff_travel(detected_gender):
     return DROPOFF_TRAVEL_FEMALE_MM, f"default-female (gender={label})"
 
 
-_LAST_WALL_DBG_AT = 0.0
-
-
-def _wall_dbg(msg: str) -> None:
-    """Throttled wall-fit diagnostic (≤ 1 Hz), gated by WALL_ALIGN_DEBUG."""
-    global _LAST_WALL_DBG_AT
-    if not WALL_ALIGN_DEBUG:
-        return
-    t = time.monotonic()
-    if t - _LAST_WALL_DBG_AT >= 1.0:
-        _LAST_WALL_DBG_AT = t
-        print(msg)
-
-
 def forward_wall_correction_deg(robot: Robot):
     """Angle (deg, CCW +) to rotate so the wall ahead becomes fronto-parallel.
 
     Fits a line to the forward lidar points (body frame, +x forward, +y left) and
     returns the signed rotation that makes the wall normal point straight ahead.
     Returns None when there aren't enough points or the fit isn't wall-like
-    (too blobby), so the caller can wait/abort instead of chasing noise. When
-    WALL_ALIGN_DEBUG is True, throttled diagnostics explain each failure.
+    (too blobby), so the caller can wait/abort instead of chasing noise.
     """
     fov = math.radians(WALL_ALIGN_FOV_HALF_DEG)
-    # Forward points inside the cone, ignoring the range cap (for diagnostics).
-    in_cone = [
-        (x, y, math.hypot(x, y)) for x, y in robot.get_obstacles()
-        if x > 0.0 and abs(math.atan2(y, x)) <= fov
+    pts = [
+        (x, y) for x, y in robot.get_obstacles()
+        if x > 0.0
+        and math.hypot(x, y) <= WALL_ALIGN_MAX_RANGE_MM
+        and abs(math.atan2(y, x)) <= fov
     ]
-    pts = [(x, y) for x, y, d in in_cone if d <= WALL_ALIGN_MAX_RANGE_MM]
     n = len(pts)
     if n < WALL_ALIGN_MIN_POINTS:
-        nearest = min((d for _, _, d in in_cone), default=float("inf"))
-        _wall_dbg(
-            f"[ALIGN] no fit: cone_pts={len(in_cone)} in_range={n} "
-            f"(need ≥{WALL_ALIGN_MIN_POINTS})  nearest={nearest:.0f} mm  "
-            f"fov±{WALL_ALIGN_FOV_HALF_DEG:.0f}°  max_range={WALL_ALIGN_MAX_RANGE_MM:.0f} mm"
-            + ("  → wall is beyond max_range; raise WALL_ALIGN_MAX_RANGE_MM"
-               if len(in_cone) >= WALL_ALIGN_MIN_POINTS else "")
-        )
         return None
 
     mx = sum(p[0] for p in pts) / n
@@ -722,13 +682,7 @@ def forward_wall_correction_deg(robot: Robot):
     minor = tr / 2.0 - disc
     if major <= 0.0:
         return None
-    thickness = math.sqrt(max(0.0, minor)) / math.sqrt(major)
-    if thickness > WALL_ALIGN_MAX_THICKNESS:
-        _wall_dbg(
-            f"[ALIGN] no fit: blobby cloud thickness={thickness:.2f} "
-            f"(max {WALL_ALIGN_MAX_THICKNESS:.2f}) over {n} pts  → narrow the cone, "
-            f"reduce max_range, or raise WALL_ALIGN_MAX_THICKNESS"
-        )
+    if math.sqrt(max(0.0, minor)) / math.sqrt(major) > WALL_ALIGN_MAX_THICKNESS:
         return None
 
     # Principal axis = wall surface direction; its normal should point forward (+x).
@@ -857,21 +811,6 @@ def closest_forward_obstacle_mm(robot: Robot) -> float:
         if x_mm < nearest:
             nearest = x_mm
     return nearest
-
-
-def forward_wall_gap_mm(robot: Robot) -> float:
-    """Forward clearance (mm) from the LIDAR to the nearest wall point ahead.
-
-    closest_forward_obstacle_mm() is measured from the wheel midpoint, but the
-    lidar sits LIDAR_MOUNT_X_MM (237 mm) ahead of it — so the body-frame reading
-    can never drop below ~LIDAR_MOUNT_X_MM + LIDAR_FILTER_MIN_MM. Subtract the
-    mount offset to get the physical gap between the robot's front sensor and the
-    wall, which is what WALL_STANDOFF_MM is meant to compare against.
-    """
-    dist_mm = closest_forward_obstacle_mm(robot)
-    if not math.isfinite(dist_mm):
-        return float("inf")
-    return dist_mm - LIDAR_MOUNT_X_MM
 
 
 # Reused figure/axes so we don't leak memory across snapshots.
@@ -1089,10 +1028,17 @@ def run(robot: Robot) -> None:
 
     state = "INIT"
     motion_handle = None
+    last_status_print_at = 0.0
 
-    # Lidar shelf/forward-approach sub-state (shared by GENDER_FORWARD + D_APPROACH_SHELF)
+    # Burger sub-FSM state
+    burger_idx = 0          # current stop index in BURGER_STOPS
     approach_started_at = 0.0
     approach_start_pose = (0.0, 0.0)  # (x_mm, y_mm) at the moment forward velocity began
+    travel_heading_deg = INITIAL_THETA_DEG  # robot's "forward" heading during burger sequence
+
+    # GPS goal-correction sub-state
+    gps_correct_attempts = 0
+    gps_correct_started_at = 0.0
 
     # Drop-off sub-FSM state
     detected_gender = None      # (label, score) captured during GENDER_FORWARD, or None
@@ -1113,64 +1059,430 @@ def run(robot: Robot) -> None:
 
         if (ENABLE_LIDAR_PLOT and ENABLE_LIDAR
                 and (now - last_lidar_plot_at) >= lidar_plot_period_s):
-            save_lidar_plot(robot, lapf_overlay=False)
+            save_lidar_plot(robot, lapf_overlay=(state == "AVOID_LAPF"))
             last_lidar_plot_at = now
 
         if state == "INIT":
             start_robot(robot)
             reset_mission_pose(robot)
             show_idle_leds(robot)
-            print("[TEST] POST-LAPF test harness — place the robot at the LAPF goal "
-                  "facing the wall, then press BTN_1 (BTN_2 cancels).")
+            print("[FSM] IDLE — press BTN_1 to start (look-left → watch → path → burger), BTN_2 to cancel")
             print(
-                f"[CFG] wall-align: fov±{WALL_ALIGN_FOV_HALF_DEG:.0f}°  "
-                f"tol={WALL_ALIGN_TOLERANCE_DEG:.1f}°  max_iters={WALL_ALIGN_MAX_ITERS}  "
-                f"max_range={WALL_ALIGN_MAX_RANGE_MM:.0f} mm  min_pts={WALL_ALIGN_MIN_POINTS}  "
-                f"max_thickness={WALL_ALIGN_MAX_THICKNESS:.2f}"
+                f"[CFG] velocity={VELOCITY_MM_S:.0f} mm/s  lookahead={LOOKAHEAD_MM:.0f} mm  "
+                f"tolerance={TOLERANCE_MM:.0f} mm  advance_radius={ADVANCE_RADIUS_MM:.0f} mm"
             )
             print(
-                f"[CFG] turns: right_1={TURN_RIGHT_1_DEG:+.1f}°  right_2={TURN_RIGHT_2_DEG:+.1f}°  "
-                f"shelf_offset={DROPOFF_SHELF_TURN_OFFSET_DEG:+.1f}°"
+                f"[CFG] look_heading={LOOK_HEADING_DEG:.1f}°  "
+                f"initial_heading={INITIAL_THETA_DEG:.1f}°  "
+                f"min_traffic_light_conf={MIN_TRAFFIC_LIGHT_CONFIDENCE:.2f}  "
+                f"min_green_color_conf={MIN_GREEN_COLOR_CONFIDENCE:.2f}"
             )
-            print(
-                f"[CFG] gender-forward: vel={GENDER_FORWARD_VEL_MM_S:.0f} mm/s  "
-                f"wall_standoff={WALL_STANDOFF_MM:.0f} mm  max_dist={GENDER_FORWARD_MAX_DIST_MM:.0f} mm"
-            )
-            print(
-                f"[CFG] drop-off travel: female={DROPOFF_TRAVEL_FEMALE_MM:.0f} mm  "
-                f"male={DROPOFF_TRAVEL_MALE_MM:.0f} mm  shelf_standoff={SHELF_STANDOFF_MM:.0f} mm  "
-                f"finish={FINISH_TRAVEL_MM:.0f} mm  sim_carry={TEST_SIMULATE_CARRY}"
-            )
-            if ENABLE_LIDAR and ENABLE_LIDAR_PLOT:
+            if ENABLE_LIDAR:
                 print(
-                    f"[CFG] lidar plot → {LIDAR_PLOT_PATH} @ {LIDAR_PLOT_HZ:.1f} Hz "
-                    f"(open with feh --reload 1, or any auto-refreshing viewer)"
+                    f"[CFG] lidar mount=({LIDAR_MOUNT_X_MM:.0f}, {LIDAR_MOUNT_Y_MM:.0f}) mm "
+                    f"theta={LIDAR_MOUNT_THETA_DEG:.1f}° filter={LIDAR_FILTER_MIN_MM:.0f}-"
+                    f"{LIDAR_RANGE_MAX_MM:.0f} mm fov={LIDAR_FOV_DEG}"
                 )
-            elif not ENABLE_LIDAR:
-                print("[warn] ENABLE_LIDAR is False — wall alignment and shelf approach will not work")
+                if ENABLE_LIDAR_PLOT:
+                    print(
+                        f"[CFG] lidar plot → {LIDAR_PLOT_PATH} @ {LIDAR_PLOT_HZ:.1f} Hz "
+                        f"(open with feh --reload 1, or any auto-refreshing viewer)"
+                    )
+                print(
+                    f"[CFG] avoid: LAPF leg idx {AVOID_SEGMENT_START_INDEX}→{AVOID_SEGMENT_GOAL_INDEX} "
+                    f"goal={AVOID_GOAL_POINT}  vel={AVOID_VELOCITY_MM_S:.0f} mm/s  "
+                    f"leash={LAPF_LEASH_LENGTH_MM:.0f} mm  rep_range={LAPF_REPULSION_RANGE_MM:.0f} mm  "
+                    f"inflation={LAPF_INFLATION_MARGIN_MM:.0f} mm"
+                )
+            else:
+                print("[warn] obstacle avoidance leg needs lidar — ENABLE_LIDAR is False; "
+                      "LAPF will see no cones")
+            if ENABLE_GPS:
+                _gps_when = (
+                    "after burger"
+                    if (GPS_ACTIVATE_AFTER_BURGER and ENABLE_BURGER_ASSEMBLY)
+                    else "at startup"
+                )
+                print(
+                    f"[CFG] gps tag_id={TAG_ID}  "
+                    f"tag_body=({TAG_BODY_OFFSET_X_MM:.0f}, {TAG_BODY_OFFSET_Y_MM:.0f}) mm  "
+                    f"position_alpha={GPS_POSITION_ALPHA:.2f}  activates={_gps_when}"
+                )
+                if ENABLE_GPS_TANGENT_HEADING:
+                    print(
+                        f"[CFG] heading=gps_tangent  "
+                        f"alpha={GPS_TANGENT_ALPHA:.2f}  "
+                        f"min_displacement={GPS_TANGENT_MIN_DISPLACEMENT_MM:.0f} mm"
+                    )
+                else:
+                    print("[CFG] heading=imu")
             state = "IDLE"
 
         elif state == "IDLE":
             if robot.was_button_pressed(Button.BTN_1):
-                # POST-LAPF TEST ENTRY — skip the mission and start at the wall
-                # alignment. Place the robot at the LAPF goal facing the wall.
                 reset_mission_pose(robot)
                 detected_gender = None
-                if TEST_SIMULATE_CARRY and ENABLE_BURGER_ASSEMBLY:
-                    # Pretend we're carrying the finished burger: lift at carry,
-                    # gripper closed, so the drop-off release is meaningful.
-                    robot.enable_servo(GRIPPER_SERVO)
-                    robot.step_enable(LIFT_STEPPER)
-                    if not move_lift_to(robot, LIFT_CARRY_STEPS):
-                        abort_to_idle(robot, None, "lift failed to reach carry at test start")
-                        continue
-                    robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_BUN_DEG)
-                    time.sleep(GRIPPER_SETTLE_S)
+                show_watching_leds(robot)
+                print(f"[FSM] LOOK_LEFT — turning to {LOOK_HEADING_DEG:.1f}°")
+                motion_handle = start_turn_to(
+                    robot, LOOK_HEADING_DEG,
+                    max_angular_rad_s=LOOK_TURN_MAX_ANGULAR_RAD_S,
+                )
+                state = "LOOK_LEFT"
+
+        elif state == "LOOK_LEFT":
+            if robot.was_button_pressed(Button.BTN_2):
+                cancel_handle(motion_handle)
+                motion_handle = None
+                robot.stop()
+                clear_watching_leds(robot)
+                show_idle_leds(robot)
+                print("[FSM] IDLE — cancelled during look-left turn")
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                print("[FSM] WATCHING — waiting for green traffic light")
+                state = "WATCHING"
+
+        elif state == "WATCHING":
+            if robot.was_button_pressed(Button.BTN_2):
+                clear_watching_leds(robot)
+                show_idle_leds(robot)
+                print("[FSM] IDLE — cancelled while watching")
+                state = "IDLE"
+            elif see_green_light(robot):
+                print(f"[VISION] green light detected — turning back to {INITIAL_THETA_DEG:.1f}°")
+                clear_watching_leds(robot)
                 show_moving_leds(robot)
-                print("[TEST] ALIGN_WALL_1 — post-LAPF test (square to the wall ahead)")
-                align_iters = 0
-                align_started_at = now
-                state = "ALIGN_WALL_1"
+                motion_handle = start_turn_to(
+                    robot, INITIAL_THETA_DEG,
+                    max_angular_rad_s=RETURN_TURN_MAX_ANGULAR_RAD_S,
+                )
+                state = "TURN_BACK"
+
+        elif state == "TURN_BACK":
+            if robot.was_button_pressed(Button.BTN_2):
+                cancel_handle(motion_handle)
+                motion_handle = None
+                robot.stop()
+                show_idle_leds(robot)
+                print("[FSM] IDLE — cancelled during turn-back")
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                print(f"[FSM] MOVING — {len(INITIAL_PATH_CONTROL_POINTS)} waypoints to patty position")
+                motion_handle = start_path(robot, INITIAL_PATH_CONTROL_POINTS)
+                last_status_print_at = now
+                state = "MOVING"
+
+        elif state == "MOVING":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "initial path cancelled")
+                motion_handle = None
+                state = "IDLE"
+            else:
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
+                if motion_handle is not None and motion_handle.is_finished():
+                    print("[FSM] initial path complete")
+                    print_status(robot)
+                    motion_handle = None
+                    robot.stop()
+                    if not ENABLE_BURGER_ASSEMBLY:
+                        show_idle_leds(robot)
+                        print("[FSM] IDLE — press BTN_1 to run again")
+                        state = "IDLE"
+                    else:
+                        if PATTY_ARRIVAL_PAUSE_S > 0.0:
+                            print(f"[FSM] pausing {PATTY_ARRIVAL_PAUSE_S:.1f}s at patty before turning")
+                            time.sleep(PATTY_ARRIVAL_PAUSE_S)
+                        _, _, travel_heading_deg = robot.get_pose()
+                        burger_idx = 0
+                        print(f"[BURGER] starting at stop {burger_idx} ({BURGER_STOPS[burger_idx][0]})")
+                        print(
+                            f"[BURGER] travel_heading={travel_heading_deg:.1f}°  "
+                            f"shelf_offset={SHELF_TURN_OFFSETS_DEG[burger_idx]:+.1f}°"
+                        )
+                        if not move_lift_to(robot, LIFT_CARRY_STEPS):
+                            abort_to_idle(robot, None, "lift failed to reach carry before shelf turn")
+                            state = "IDLE"
+                            continue
+                        motion_handle = start_shelf_turn(
+                            robot,
+                            travel_heading_deg + SHELF_TURN_OFFSETS_DEG[burger_idx],
+                        )
+                        state = "B_TURN_TO_SHELF"
+
+        # ---------------------------------------------------------------
+        # Burger assembly sub-FSM
+        # ---------------------------------------------------------------
+
+        elif state == "B_TURN_TO_SHELF":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "burger cancelled during turn-to-shelf")
+                motion_handle = None
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                approach_started_at = now
+                approach_start_pose = robot.get_pose()[:2]
+                if ENABLE_LIDAR:
+                    print(
+                        f"[BURGER] APPROACH_SHELF (stop={BURGER_STOPS[burger_idx][0]}) "
+                        f"— standoff={SHELF_STANDOFF_MM:.0f} mm, vel={SHELF_APPROACH_VEL_MM_S:.0f} mm/s"
+                    )
+                    state = "B_APPROACH_SHELF"
+                else:
+                    print(
+                        f"[BURGER] APPROACH_SHELF fallback (no lidar) — "
+                        f"forward {SHELF_APPROACH_MAX_DIST_MM:.0f} mm"
+                    )
+                    motion_handle = robot.move_forward(
+                        SHELF_APPROACH_MAX_DIST_MM,
+                        velocity=SHELF_APPROACH_VEL_MM_S,
+                        tolerance=BURGER_TRAVEL_TOL_MM,
+                        blocking=False,
+                        timeout=SHELF_APPROACH_TIMEOUT_S,
+                    )
+                    state = "B_APPROACH_FALLBACK"
+
+        elif state == "B_APPROACH_SHELF":
+            if robot.was_button_pressed(Button.BTN_2):
+                robot.stop()
+                show_idle_leds(robot)
+                print("[FSM] IDLE — burger cancelled during shelf approach")
+                state = "IDLE"
+                continue
+
+            dist_mm = closest_forward_obstacle_mm(robot)
+            cur_x, cur_y, _ = robot.get_pose()
+            sx, sy = approach_start_pose
+            advanced_mm = math.hypot(cur_x - sx, cur_y - sy)
+            timed_out = (now - approach_started_at) > SHELF_APPROACH_TIMEOUT_S
+            capped = advanced_mm >= SHELF_APPROACH_MAX_DIST_MM
+            close_enough = dist_mm <= SHELF_STANDOFF_MM
+
+            if close_enough or capped or timed_out:
+                robot.stop()
+                reason = ("standoff" if close_enough
+                          else "max-distance cap" if capped
+                          else "timeout")
+                print(
+                    f"[BURGER] approach done ({reason}) — "
+                    f"nearest={dist_mm if math.isfinite(dist_mm) else float('inf'):.0f} mm  "
+                    f"advanced={advanced_mm:.0f} mm"
+                )
+                state = "B_MANIPULATE"
+            else:
+                robot.set_velocity(SHELF_APPROACH_VEL_MM_S, 0.0)
+
+        elif state == "B_APPROACH_FALLBACK":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "burger cancelled during fallback approach")
+                motion_handle = None
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                state = "B_MANIPULATE"
+
+        elif state == "B_MANIPULATE":
+            label, _, actions = BURGER_STOPS[burger_idx]
+            print(f"[BURGER] MANIPULATE @ {label} ({len(actions)} action(s))")
+            ok = run_manipulation_actions(robot, actions)
+            if not ok:
+                abort_to_idle(robot, None, f"manipulation failed at stop {label}")
+                state = "IDLE"
+            else:
+                print(f"[BURGER] retreating {RETREAT_FROM_SHELF_MM:.0f} mm from shelf")
+                motion_handle = robot.move_backward(
+                    RETREAT_FROM_SHELF_MM,
+                    velocity=BURGER_TRAVEL_VEL_MM_S,
+                    tolerance=BURGER_TRAVEL_TOL_MM,
+                    blocking=False,
+                    timeout=BURGER_TRAVEL_TIMEOUT_S,
+                )
+                state = "B_RETREAT"
+
+        elif state == "B_RETREAT":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "burger cancelled during retreat")
+                motion_handle = None
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                print(f"[BURGER] turning back to forward heading {travel_heading_deg:.1f}°")
+                motion_handle = start_shelf_turn(robot, travel_heading_deg)
+                state = "B_TURN_TO_FORWARD"
+
+        elif state == "B_TURN_TO_FORWARD":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "burger cancelled during turn-to-forward")
+                motion_handle = None
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                burger_idx += 1
+                if burger_idx >= len(BURGER_STOPS):
+                    # Burger built — start the continuation: pure-pursuit leg A,
+                    # then LAPF through the cones, then pure-pursuit leg C.
+                    # Activate GPS now: the burger work leaves the heading off by
+                    # a bit, and GPS only engages here to land the LAPF goal.
+                    if ENABLE_GPS and GPS_ACTIVATE_AFTER_BURGER:
+                        activate_gps(robot)
+                        print("[GPS] activated after burger — engaging for LAPF goal + correction")
+                    if CONTINUATION_LEG_A_CONTROL_POINTS:
+                        print(
+                            f"[BURGER] complete — continuation leg A "
+                            f"({len(CONTINUATION_LEG_A_CONTROL_POINTS)} waypoints) to avoidance start"
+                        )
+                        motion_handle = start_path(robot, CONTINUATION_LEG_A_CONTROL_POINTS)
+                        last_status_print_at = now
+                        state = "CONTINUATION_A"
+                    else:
+                        print(f"[BURGER] complete — LAPF avoidance to goal {AVOID_GOAL_POINT}")
+                        motion_handle = start_lapf_goal(robot, AVOID_GOAL_POINT)
+                        last_status_print_at = now
+                        state = "AVOID_LAPF"
+                else:
+                    next_label, travel_mm, _ = BURGER_STOPS[burger_idx]
+                    direction = "forward" if travel_mm >= 0.0 else "backward"
+                    print(
+                        f"[BURGER] traveling {direction} {abs(travel_mm):.0f} mm "
+                        f"to stop {burger_idx} ({next_label})"
+                    )
+                    if travel_mm == 0.0:
+                        # No travel needed — raise to carry, then turn-to-shelf.
+                        if not move_lift_to(robot, LIFT_CARRY_STEPS):
+                            abort_to_idle(robot, None, "lift failed to reach carry before shelf turn")
+                            state = "IDLE"
+                            continue
+                        motion_handle = start_shelf_turn(
+                            robot,
+                            travel_heading_deg + SHELF_TURN_OFFSETS_DEG[burger_idx],
+                        )
+                        state = "B_TURN_TO_SHELF"
+                    else:
+                        motion_handle = start_straight_move(robot, travel_mm)
+                        state = "B_TRAVEL"
+
+        elif state == "B_TRAVEL":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "burger cancelled during inter-stop travel")
+                motion_handle = None
+                state = "IDLE"
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                if not move_lift_to(robot, LIFT_CARRY_STEPS):
+                    abort_to_idle(robot, None, "lift failed to reach carry before shelf turn")
+                    state = "IDLE"
+                    continue
+                motion_handle = start_shelf_turn(
+                    robot,
+                    travel_heading_deg + SHELF_TURN_OFFSETS_DEG[burger_idx],
+                )
+                state = "B_TURN_TO_SHELF"
+
+        elif state == "CONTINUATION_A":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "continuation leg A cancelled")
+                motion_handle = None
+                state = "IDLE"
+            else:
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_status(robot)
+                    last_status_print_at = now
+                if motion_handle is not None and motion_handle.is_finished():
+                    print("[FSM] leg A complete — starting LAPF obstacle avoidance")
+                    print_status(robot)
+                    motion_handle = None
+                    robot.stop()
+                    print(
+                        f"[AVOID] LAPF to goal {AVOID_GOAL_POINT}  "
+                        f"vel={AVOID_VELOCITY_MM_S:.0f} mm/s  leash={LAPF_LEASH_LENGTH_MM:.0f} mm  "
+                        f"rep_range={LAPF_REPULSION_RANGE_MM:.0f} mm  inflation={LAPF_INFLATION_MARGIN_MM:.0f} mm"
+                    )
+                    motion_handle = start_lapf_goal(robot, AVOID_GOAL_POINT)
+                    last_status_print_at = now
+                    state = "AVOID_LAPF"
+
+        elif state == "AVOID_LAPF":
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "LAPF avoidance cancelled")
+                motion_handle = None
+                state = "IDLE"
+            else:
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_avoid_status(robot)
+                    last_status_print_at = now
+                if motion_handle is not None and motion_handle.is_finished():
+                    print("[FSM] LAPF avoidance complete")
+                    print_avoid_status(robot)
+                    motion_handle = None
+                    robot.stop()
+                    gps_correct_attempts = 0
+                    gps_correct_started_at = now
+                    if ENABLE_GPS_GOAL_CORRECTION and ENABLE_GPS:
+                        print(
+                            f"[GPS] correcting onto goal {AVOID_GOAL_POINT} "
+                            f"(tol={GPS_CORRECT_TOLERANCE_MM:.0f} mm, "
+                            f"max {GPS_CORRECT_MAX_ATTEMPTS} passes)"
+                        )
+                    state = "GPS_CORRECT"
+
+        elif state == "GPS_CORRECT":
+            # Closed-loop GPS nudge onto AVOID_GOAL_POINT before the final leg.
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, "GPS correction cancelled")
+                motion_handle = None
+                state = "IDLE"
+            elif motion_handle is not None:
+                # A corrective move_to is in flight — wait for it to finish.
+                if now - last_status_print_at >= STATUS_PRINT_INTERVAL_S:
+                    print_avoid_status(robot)
+                    last_status_print_at = now
+                if motion_handle.is_finished():
+                    motion_handle = None
+                    robot.stop()
+            else:
+                # No move in flight — decide whether to correct, accept, or skip.
+                proceed = False
+                if not (ENABLE_GPS_GOAL_CORRECTION and ENABLE_GPS):
+                    proceed = True
+                else:
+                    err = gps_goal_error_mm(robot, AVOID_GOAL_POINT)
+                    if err is None or not robot.is_gps_active():
+                        # No usable GPS truth yet — wait briefly, then give up.
+                        if now - gps_correct_started_at >= GPS_CORRECT_FRESH_TIMEOUT_S:
+                            print("[GPS] no fresh fix — skipping correction")
+                            proceed = True
+                    elif err <= GPS_CORRECT_TOLERANCE_MM:
+                        print(
+                            f"[GPS] on goal — error {err:.0f} mm "
+                            f"≤ {GPS_CORRECT_TOLERANCE_MM:.0f} mm"
+                        )
+                        proceed = True
+                    elif gps_correct_attempts >= GPS_CORRECT_MAX_ATTEMPTS:
+                        print(
+                            f"[GPS] giving up after {gps_correct_attempts} "
+                            f"attempt(s) — residual error {err:.0f} mm"
+                        )
+                        proceed = True
+                    else:
+                        gps_correct_attempts += 1
+                        print(
+                            f"[GPS] correction {gps_correct_attempts}/"
+                            f"{GPS_CORRECT_MAX_ATTEMPTS} — error {err:.0f} mm → "
+                            f"move_to {AVOID_GOAL_POINT}"
+                        )
+                        motion_handle = start_gps_correction(robot, AVOID_GOAL_POINT)
+                        last_status_print_at = now
+
+                if proceed:
+                    print("[FSM] ALIGN_WALL_1 — squaring perpendicular to the wall ahead")
+                    align_iters = 0
+                    align_started_at = now
+                    state = "ALIGN_WALL_1"
 
         elif state == "ALIGN_WALL_1":
             # Square perpendicular to the wall ahead, then a relative 90° right.
@@ -1186,53 +1498,18 @@ def run(robot: Robot) -> None:
                 if corr is None:
                     if now - align_started_at >= WALL_ALIGN_TIMEOUT_S:
                         print("[ALIGN] no usable wall fit — proceeding without squaring")
-                        approach_started_at = now
-                        approach_start_pose = robot.get_pose()[:2]
-                        print(f"[FSM] APPROACH_WALL_1 — forward to wall (standoff {WALL_STANDOFF_MM:.0f} mm)")
-                        state = "APPROACH_WALL_1"
+                        motion_handle = start_shelf_turn(robot, robot.get_pose()[2] - 90.0)
+                        print("[FSM] TURN_RIGHT_1 — relative 90° right")
+                        state = "TURN_RIGHT_1"
                 elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or align_iters >= WALL_ALIGN_MAX_ITERS:
                     print(f"[ALIGN] squared to wall (residual {corr:+.1f}°, {align_iters} iter)")
-                    approach_started_at = now
-                    approach_start_pose = robot.get_pose()[:2]
-                    print(f"[FSM] APPROACH_WALL_1 — forward to wall (standoff {WALL_STANDOFF_MM:.0f} mm)")
-                    state = "APPROACH_WALL_1"
+                    motion_handle = start_shelf_turn(robot, robot.get_pose()[2] - 90.0)
+                    print("[FSM] TURN_RIGHT_1 — relative 90° right")
+                    state = "TURN_RIGHT_1"
                 else:
                     align_iters += 1
                     print(f"[ALIGN] correction {align_iters}/{WALL_ALIGN_MAX_ITERS}: {corr:+.1f}°")
                     motion_handle = start_align_turn(robot, robot.get_pose()[2] + corr)
-
-        elif state == "APPROACH_WALL_1":
-            # Drive forward until the wall ahead is within WALL_STANDOFF_MM, then turn.
-            if robot.was_button_pressed(Button.BTN_2):
-                robot.stop()
-                show_idle_leds(robot)
-                print("[FSM] IDLE — cancelled during wall-1 approach")
-                state = "IDLE"
-                continue
-
-            gap_mm = forward_wall_gap_mm(robot)
-            cur_x, cur_y, _ = robot.get_pose()
-            sx, sy = approach_start_pose
-            advanced_mm = math.hypot(cur_x - sx, cur_y - sy)
-            timed_out = (now - approach_started_at) > GENDER_FORWARD_TIMEOUT_S
-            capped = advanced_mm >= GENDER_FORWARD_MAX_DIST_MM
-            close_enough = gap_mm <= WALL_STANDOFF_MM
-
-            if close_enough or capped or timed_out:
-                robot.stop()
-                reason = ("wall-standoff" if close_enough
-                          else "max-distance cap" if capped
-                          else "timeout")
-                print(
-                    f"[FSM] wall-1 approach done ({reason}) — "
-                    f"wall_gap={gap_mm if math.isfinite(gap_mm) else float('inf'):.0f} mm  "
-                    f"advanced={advanced_mm:.0f} mm"
-                )
-                motion_handle = start_shelf_turn(robot, robot.get_pose()[2] + TURN_RIGHT_1_DEG)
-                print(f"[FSM] TURN_RIGHT_1 — relative {TURN_RIGHT_1_DEG:+.1f}°")
-                state = "TURN_RIGHT_1"
-            else:
-                robot.set_velocity(GENDER_FORWARD_VEL_MM_S, 0.0)
 
         elif state == "TURN_RIGHT_1":
             if robot.was_button_pressed(Button.BTN_2):
@@ -1241,45 +1518,13 @@ def run(robot: Robot) -> None:
                 state = "IDLE"
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
-                align_iters = 0
-                align_started_at = now
-                print("[FSM] ALIGN_WALL_GENDER — squaring to the wall ahead before the gender drive")
-                state = "ALIGN_WALL_GENDER"
-
-        elif state == "ALIGN_WALL_GENDER":
-            # Square perpendicular to the wall ahead, then drive forward + read gender.
-            if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, "wall-align (gender) cancelled")
-                motion_handle = None
-                state = "IDLE"
-            elif motion_handle is not None:
-                if motion_handle.is_finished():
-                    motion_handle = None   # squaring turn done — re-measure next tick
-            else:
-                corr = forward_wall_correction_deg(robot)
-                if corr is None:
-                    if now - align_started_at >= WALL_ALIGN_TIMEOUT_S:
-                        print("[ALIGN] no usable wall fit — proceeding without squaring")
-                        approach_started_at = now
-                        approach_start_pose = robot.get_pose()[:2]
-                        print(
-                            f"[FSM] GENDER_FORWARD — forward to wall (standoff {WALL_STANDOFF_MM:.0f} mm), "
-                            f"scanning for a person"
-                        )
-                        state = "GENDER_FORWARD"
-                elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or align_iters >= WALL_ALIGN_MAX_ITERS:
-                    print(f"[ALIGN] squared to wall (residual {corr:+.1f}°, {align_iters} iter)")
-                    approach_started_at = now
-                    approach_start_pose = robot.get_pose()[:2]
-                    print(
-                        f"[FSM] GENDER_FORWARD — forward to wall (standoff {WALL_STANDOFF_MM:.0f} mm), "
-                        f"scanning for a person"
-                    )
-                    state = "GENDER_FORWARD"
-                else:
-                    align_iters += 1
-                    print(f"[ALIGN] correction {align_iters}/{WALL_ALIGN_MAX_ITERS}: {corr:+.1f}°")
-                    motion_handle = start_align_turn(robot, robot.get_pose()[2] + corr)
+                approach_started_at = now
+                approach_start_pose = robot.get_pose()[:2]
+                print(
+                    f"[FSM] GENDER_FORWARD — forward to wall (standoff {WALL_STANDOFF_MM:.0f} mm), "
+                    f"scanning for a person"
+                )
+                state = "GENDER_FORWARD"
 
         elif state == "GENDER_FORWARD":
             if robot.was_button_pressed(Button.BTN_2):
@@ -1296,13 +1541,13 @@ def run(robot: Robot) -> None:
                     detected_gender = found
                     print(f"[VISION] person gender = {found[0]} (score {found[1]:.2f}) — stored")
 
-            gap_mm = forward_wall_gap_mm(robot)
+            dist_mm = closest_forward_obstacle_mm(robot)
             cur_x, cur_y, _ = robot.get_pose()
             sx, sy = approach_start_pose
             advanced_mm = math.hypot(cur_x - sx, cur_y - sy)
             timed_out = (now - approach_started_at) > GENDER_FORWARD_TIMEOUT_S
             capped = advanced_mm >= GENDER_FORWARD_MAX_DIST_MM
-            close_enough = gap_mm <= WALL_STANDOFF_MM
+            close_enough = dist_mm <= WALL_STANDOFF_MM
 
             if close_enough or capped or timed_out:
                 robot.stop()
@@ -1312,7 +1557,7 @@ def run(robot: Robot) -> None:
                 gender_str = detected_gender[0] if detected_gender else "none"
                 print(
                     f"[FSM] gender-forward done ({reason}) — "
-                    f"wall_gap={gap_mm if math.isfinite(gap_mm) else float('inf'):.0f} mm  "
+                    f"nearest={dist_mm if math.isfinite(dist_mm) else float('inf'):.0f} mm  "
                     f"advanced={advanced_mm:.0f} mm  gender={gender_str}"
                 )
                 align_iters = 0
@@ -1335,13 +1580,13 @@ def run(robot: Robot) -> None:
                 if corr is None:
                     if now - align_started_at >= WALL_ALIGN_TIMEOUT_S:
                         print("[ALIGN] no usable wall fit — proceeding without squaring")
-                        motion_handle = start_shelf_turn(robot, robot.get_pose()[2] + TURN_RIGHT_2_DEG)
-                        print(f"[FSM] TURN_RIGHT_2 — relative {TURN_RIGHT_2_DEG:+.1f}°")
+                        motion_handle = start_shelf_turn(robot, robot.get_pose()[2] - 90.0)
+                        print("[FSM] TURN_RIGHT_2 — relative 90° right")
                         state = "TURN_RIGHT_2"
                 elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or align_iters >= WALL_ALIGN_MAX_ITERS:
                     print(f"[ALIGN] squared to wall (residual {corr:+.1f}°, {align_iters} iter)")
-                    motion_handle = start_shelf_turn(robot, robot.get_pose()[2] + TURN_RIGHT_2_DEG)
-                    print(f"[FSM] TURN_RIGHT_2 — relative {TURN_RIGHT_2_DEG:+.1f}°")
+                    motion_handle = start_shelf_turn(robot, robot.get_pose()[2] - 90.0)
+                    print("[FSM] TURN_RIGHT_2 — relative 90° right")
                     state = "TURN_RIGHT_2"
                 else:
                     align_iters += 1
