@@ -93,24 +93,10 @@ MIN_GREEN_COLOR_CONFIDENCE = 0.07
 # ---------------------------------------------------------------------------
 # Moving 1 — drive to patty
 # ---------------------------------------------------------------------------
-MOV1_DISTANCE_MM   = 1150.0    # forward distance to reach patty position
+MOV1_DISTANCE_MM   = 1170.0    # forward distance to reach patty position
 MOV1_VELOCITY_MM_S = 120.0
 MOV1_TOLERANCE_MM  = 20.0
 MOV1_PAUSE_S       = 0.5
-
-# ---------------------------------------------------------------------------
-# TEST HARNESS (this file only) — start at the post-burger sequence (MOV2)
-# ---------------------------------------------------------------------------
-# This is a trimmed-behaviour copy of main.py used to tune everything AFTER the
-# burger assembly. On BTN_1 the FSM skips traffic-light / MOV1 / burger and
-# jumps straight to MOV2_TURN_1 (then MOV2 / LAPF / MOV3 / gender / MOV4 /
-# drop-off / finish run exactly as in the real mission). MOV2 is relative
-# (relative turns + lidar wall aligns), so place the robot where it would be
-# when the burger sub-FSM finishes — facing forward, ready for the −98° T1 turn.
-# NOTE: odometry is reset to (0,0,90°) on BTN_1, so the LATER absolute-frame
-# LAPF goal will be relative to wherever you place the robot, not the true
-# mission origin. MOV2 itself is unaffected (all relative).
-TEST_SIMULATE_CARRY = True   # on BTN_1, raise lift to carry + close gripper to mimic holding the burger
 
 # ---------------------------------------------------------------------------
 # Gripper servo
@@ -126,7 +112,7 @@ GRIPPER_SETTLE_S        = 0.8
 # ---------------------------------------------------------------------------
 LIFT_STEPPER          = Stepper.STEPPER_1
 LIFT_DIR_INVERTED     = True    # positive logical steps = upward
-LIFT_MAX_VELOCITY     = 2000
+LIFT_MAX_VELOCITY     = 2500
 LIFT_ACCELERATION     = 2000
 LIFT_MOVE_TIMEOUT_S   = 30.0    # headroom for a slow lift if boot config was dropped
 LIFT_CONFIG_SETTLE_S  = 0.15    # let step_set_config land before the first move
@@ -146,31 +132,31 @@ LIFT_STACK_PICK_STEPS      = 0                                # lower to shelf s
 # Burger assembly — shelf approach
 # ---------------------------------------------------------------------------
 SHELF_APPROACH_VEL_MM_S     = 40.0
-SHELF_STANDOFF_MM           = 300.0   # stop when nearest forward point ≤ this
+SHELF_STANDOFF_MM           = 290.0   # stop when nearest forward point ≤ this
 SHELF_APPROACH_FOV_HALF_DEG = 10.0    # narrow forward cone for approach distance
 SHELF_APPROACH_MAX_DIST_MM  = 300.0   # safety cap on approach distance
 SHELF_APPROACH_TIMEOUT_S    = 20.0
 LIDAR_FILTER_MIN_MM         = 25.0    # overrides hardware_map for this run
-RETREAT_FROM_SHELF_MM       = 200.0
+RETREAT_FROM_SHELF_MM       = 210.0
 
 # Per-stop shelf turn: heading = INITIAL_THETA_DEG + offset (CCW = positive = left)
 SHELF_TURN_OFFSETS_DEG = [
     94.0,   # 0: patty
-    97.0,   # 1: left bun
+    98.0,   # 1: left bun
     97.0,   # 2: right bun
-    93.0,   # 3: stack
+    95.0,   # 3: stack
 ]
 
 # Per-stop lidar FOV half-angle for perpendicular alignment
 SHELF_ALIGN_FOV_DEG = [
     20.0,   # 0: patty
-    20.0,   # 1: left bun
+    10.0,   # 1: left bun
     20.0,   # 2: right bun
-    20.0,   # 3: stack
+    10.0,   # 3: stack
 ]
 
 SHELF_TURN_MAX_ANGULAR_RAD_S = 1.4
-SHELF_TURN_TOLERANCE_DEG     = 3.0
+SHELF_TURN_TOLERANCE_DEG     = 2.0
 
 # ---------------------------------------------------------------------------
 # Burger inter-stop travel (signed: + = forward, - = backward in user heading)
@@ -180,12 +166,12 @@ SHELF_TURN_TOLERANCE_DEG     = 3.0
 # ---------------------------------------------------------------------------
 INTER_TURN_DEG = [
     97.0,    # patty → LB: turn ~82° CCW to face backward, then drive
-    -97.0,   # LB → RB: turn ~98° CW to face forward, then drive
+    -105.0,   # LB → RB: turn ~98° CW to face forward, then drive
     97.0,    # RB → Stack: turn ~82° CCW to face backward, then drive
 ]
 INTER_DRIVE_MM = [
-    152.0,   # patty → LB (traveling backward along shelf = positive forward)
-    304.0,   # LB → RB (traveling forward along shelf)
+    137.0,   # patty → LB (traveling backward along shelf = positive forward)
+    309.0,   # LB → RB (traveling forward along shelf)
     304.0,   # RB → Stack (traveling backward = positive forward in backward heading)
 ]
 INTER_PAUSE_S = 0.25
@@ -219,7 +205,7 @@ MOV2_VELOCITY_MM_S   = 120.0
 MOV2_TOLERANCE_MM    = 20.0
 MOV2_DRIVE_TIMEOUT_S = 30.0
 MOV2_APPROACH_VEL_MM_S = 100.0        # slow speed for the DRIVE_2 wall-standoff approach
-MOV2_APPROACH_2_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_2_MM)
+MOV2_APPROACH_2_STANDOFF_MM = 165.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_2_MM)
 MOV2_APPROACH_3_STANDOFF_MM = 180.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_3_MM)
 MOV2_APPROACH_4_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_4_MM)
 MOV2_PAUSE_SHORT_S   = 0.25
@@ -230,7 +216,7 @@ MOV2_TURN_TOLERANCE_DEG     = 2.0
 # ---------------------------------------------------------------------------
 # Obstacle avoidance (LAPF)
 # ---------------------------------------------------------------------------
-LAPF_GOAL = (-200.0, 2830.0)   # robot-relative goal: odom is reset to (0,0,90°) right before LAPF, so this is straight ahead
+LAPF_GOAL = (0.0, 2700.0)   # robot-relative goal: odom is reset to (0,0,90°) right before LAPF, so this is straight ahead
 LAPF_VELOCITY_MM_S      = 60.0
 LAPF_TOLERANCE_MM       = 50.0
 LAPF_MAX_ANGULAR_RAD_S  = 1.0
@@ -247,7 +233,7 @@ LAPF_PAUSE_S            = 0.5
 # ---------------------------------------------------------------------------
 # Moving 3
 # ---------------------------------------------------------------------------
-MOV3_ALIGN_PERP_FOV     = 20.0   # FOV for perpendicular wall alignment
+MOV3_ALIGN_PERP_FOV     = 10.0   # FOV for perpendicular wall alignment
 MOV3_WALL_STANDOFF_MM   = 150.0
 MOV3_APPROACH_VEL_MM_S  = 60.0
 MOV3_APPROACH_MAX_MM    = 2500.0
@@ -256,7 +242,7 @@ MOV3_TURN_DEG           = -92.0  # right turn after wall approach
 MOV3_TURN_MAX_ANGULAR_RAD_S = 1.0
 MOV3_TURN_TOLERANCE_DEG = 3.0
 MOV3_ALIGN_PARA_FOV     = 60.0   # FOV for parallel left-wall alignment
-MOV3_DRIVE_MM           = 200.0
+MOV3_DRIVE_MM           = 150.0
 MOV3_VELOCITY_MM_S      = 120.0
 MOV3_TOLERANCE_MM       = 20.0
 MOV3_DRIVE_TIMEOUT_S    = 30.0
@@ -270,7 +256,7 @@ MIN_PERSON_CONFIDENCE = 0.20
 # ---------------------------------------------------------------------------
 # Moving 4
 # ---------------------------------------------------------------------------
-MOV4_ALIGN_PERP_FOV     = 20.0
+MOV4_ALIGN_PERP_FOV     = 10.0
 MOV4_WALL_STANDOFF_MM   = 195.0
 MOV4_APPROACH_VEL_MM_S  = 50.0
 MOV4_APPROACH_MAX_MM    = 2500.0
@@ -311,9 +297,9 @@ DROP_POST_RELEASE_PAUSE_S = 0.5
 # ---------------------------------------------------------------------------
 MIN_STOP_SIGN_CONFIDENCE = 0.89   # YOLO detection confidence threshold (adjustable)
 STOP_SIGN_VEL_MM_S      = 80.0
-STOP_SIGN_APPROACH_MM   = 300.0    # after first seeing the sign, drive this far, THEN stop
+STOP_SIGN_APPROACH_MM   = 250.0    # after first seeing the sign, drive this far, THEN stop
 STOP_SIGN_WAIT_S        = 3.0
-STOP_SIGN_FINAL_MM      = 800.0   # drive this far after the stop
+STOP_SIGN_FINAL_MM      = 600.0   # drive this far after the stop
 STOP_SIGN_VEL_FINAL_MM_S = 100.0
 STOP_SIGN_TOLERANCE_MM  = 20.0
 STOP_SIGN_TIMEOUT_S     = 30.0
@@ -818,23 +804,6 @@ def prime_lift(robot: Robot) -> None:
     time.sleep(GRIPPER_SETTLE_S)
 
 
-def simulate_carry(robot: Robot) -> None:
-    """TEST harness: mimic holding the assembled burger.
-
-    prime_lift already raised the lift to carry and opened the gripper; here we
-    just close the gripper on the (hand-loaded) burger so the later drop-off
-    release is a real open. Keeps the lift at carry height.
-    """
-    global _LIFT_LOGICAL_STEPS
-    robot.enable_servo(GRIPPER_SERVO)
-    robot.step_enable(LIFT_STEPPER)
-    if _LIFT_LOGICAL_STEPS != LIFT_CARRY_STEPS:
-        move_lift_to(robot, LIFT_CARRY_STEPS)
-    robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_BUN_DEG)
-    time.sleep(GRIPPER_SETTLE_S)
-    print(f'[TEST] simulate_carry — lift at carry ({LIFT_CARRY_STEPS}), gripper closed on burger')
-
-
 # ---------------------------------------------------------------------------
 # Manipulation helper (blocking)
 # ---------------------------------------------------------------------------
@@ -956,16 +925,13 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 reset_mission(robot)
                 robot.set_led(LED.ORANGE, 0)
                 robot.set_led(LED.GREEN, 200)
-                # TEST HARNESS: skip traffic-light / MOV1 / burger and jump
-                # straight to the post-burger sequence (MOV2 onward) so it can be
-                # tuned in isolation. MOV2 is relative (relative turns + lidar
-                # wall aligns), so the reset odometry heading is fine — just place
-                # the robot where it would be when the burger sub-FSM finishes,
-                # facing forward and ready for the MOV2_TURN_1 (−98°) turn.
-                if TEST_SIMULATE_CARRY:
-                    simulate_carry(robot)
-                print('[TEST] jumping to post-burger — MOV2_TURN_1')
-                state = 'MOV2_TURN_1'
+                print(f'[FSM] TL_TURN_LEFT — turning {LOOK_LEFT_DEG:.0f}° left')
+                motion_handle = _start_turn_to(
+                    robot,
+                    robot.get_pose()[2] + LOOK_LEFT_DEG,
+                    max_angular=TL_TURN_MAX_ANGULAR_RAD_S,
+                )
+                state = 'TL_TURN_LEFT'
 
         # ===================================================================
         # TRAFFIC LIGHT
