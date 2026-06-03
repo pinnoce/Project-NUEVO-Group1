@@ -312,6 +312,7 @@ DROP_POST_RELEASE_PAUSE_S = 0.5
 MIN_STOP_SIGN_CONFIDENCE = 0.89   # YOLO detection confidence threshold (adjustable)
 STOP_SIGN_VEL_MM_S      = 80.0
 STOP_SIGN_APPROACH_MM   = 300.0    # after first seeing the sign, drive this far, THEN stop
+STOP_SIGN_APPROACH_FEMALE_EXTRA_MM = 150.0   # female: drive this much further than the male/base STOP_SIGN_APPROACH_MM before stopping
 STOP_SIGN_WAIT_S        = 3.0
 STOP_SIGN_FINAL_MM      = 800.0   # drive this far after the stop
 STOP_SIGN_VEL_FINAL_MM_S = 100.0
@@ -1996,8 +1997,14 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 robot.set_velocity(STOP_SIGN_VEL_MM_S, 0.0)
 
         elif state == 'STOP_APPROACH':
-            # Stop sign read: keep driving STOP_SIGN_APPROACH_MM, then stop + wait.
-            motion_handle = _start_drive(robot, STOP_SIGN_APPROACH_MM, STOP_SIGN_VEL_MM_S,
+            # Stop sign read: keep driving, then stop + wait. Female drives an extra
+            # STOP_SIGN_APPROACH_FEMALE_EXTRA_MM beyond the male/base distance.
+            _label = _detected_gender[0] if _detected_gender else 'female'
+            _approach_mm = STOP_SIGN_APPROACH_MM
+            if _label != 'male':
+                _approach_mm += STOP_SIGN_APPROACH_FEMALE_EXTRA_MM
+            print(f'[FSM] STOP approach — gender={_label} drive={_approach_mm:.0f} mm')
+            motion_handle = _start_drive(robot, _approach_mm, STOP_SIGN_VEL_MM_S,
                                          STOP_SIGN_TOLERANCE_MM, timeout=15.0)
             state = 'STOP_APPROACH_WAIT'
 
