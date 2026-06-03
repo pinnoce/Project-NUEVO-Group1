@@ -202,22 +202,22 @@ BURGER_POST_STACK_PAUSE_S = 0.5
 # FOV for each align step is independently tunable.
 # ---------------------------------------------------------------------------
 # Turns: 1-3 are right (negative), 4-5 are left (positive)
-MOV2_TURN_1_DEG    = -102.0   # right: exit burger area → start nav corridor
+MOV2_TURN_1_DEG    = -98.0   # right: exit burger area → start nav corridor
 MOV2_DRIVE_1_MM    = 1000.0    # drive after T1 align (spec line 2)
-MOV2_DRIVE_2_MM    = 2000.0    # drive before T2       (spec line 3)
+MOV2_DRIVE_2_MM    = 1200.0    # drive before T2       (spec line 3)
 MOV2_TURN_2_DEG    = -90.0    # right turn 1
 MOV2_DRIVE_3_MM    = 450.0   # drive before T3       (spec line 4)
-MOV2_TURN_3_DEG    = -98.0    # right turn 2
+MOV2_TURN_3_DEG    = -90.0    # right turn 2
 MOV2_DRIVE_4_MM    = 3000.0    # drive before T4       (spec line 5)
-MOV2_TURN_4_DEG    = 93.0     # left: switch to right wall
+MOV2_TURN_4_DEG    = 90.0     # left: switch to right wall
 MOV2_DRIVE_5_MM    = 700.0    # final drive           (spec line 6)
 MOV2_TURN_5_DEG    = 90.0     # left: final heading correction
-MOV2_ALIGN_LEFT_FOV  = 70.0   # FOV for all left-wall parallel aligns
-MOV2_ALIGN_RIGHT_FOV = 70.0   # FOV for all right-wall parallel aligns
+MOV2_ALIGN_LEFT_FOV  = 40.0   # FOV for all left-wall parallel aligns
+MOV2_ALIGN_RIGHT_FOV = 40.0   # FOV for all right-wall parallel aligns
 MOV2_VELOCITY_MM_S   = 120.0
 MOV2_TOLERANCE_MM    = 20.0
 MOV2_DRIVE_TIMEOUT_S = 30.0
-MOV2_APPROACH_VEL_MM_S = 100.0        # slow speed for the DRIVE_2 wall-standoff approach
+MOV2_APPROACH_VEL_MM_S = 60.0        # slow speed for the DRIVE_2 wall-standoff approach
 MOV2_APPROACH_2_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_2_MM)
 MOV2_APPROACH_3_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_3_MM)
 MOV2_APPROACH_4_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_4_MM)

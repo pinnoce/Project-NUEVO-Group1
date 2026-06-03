@@ -99,20 +99,6 @@ MOV1_TOLERANCE_MM  = 20.0
 MOV1_PAUSE_S       = 0.5
 
 # ---------------------------------------------------------------------------
-# TEST HARNESS (this file only) — start at the post-burger sequence (MOV2)
-# ---------------------------------------------------------------------------
-# This is a trimmed-behaviour copy of main.py used to tune everything AFTER the
-# burger assembly. On BTN_1 the FSM skips traffic-light / MOV1 / burger and
-# jumps straight to MOV2_TURN_1 (then MOV2 / LAPF / MOV3 / gender / MOV4 /
-# drop-off / finish run exactly as in the real mission). MOV2 is relative
-# (relative turns + lidar wall aligns), so place the robot where it would be
-# when the burger sub-FSM finishes — facing forward, ready for the −98° T1 turn.
-# NOTE: odometry is reset to (0,0,90°) on BTN_1, so the LATER absolute-frame
-# LAPF goal will be relative to wherever you place the robot, not the true
-# mission origin. MOV2 itself is unaffected (all relative).
-TEST_SIMULATE_CARRY = True   # on BTN_1, raise lift to carry + close gripper to mimic holding the burger
-
-# ---------------------------------------------------------------------------
 # Gripper servo
 # ---------------------------------------------------------------------------
 GRIPPER_SERVO           = ServoChannel.CH_1
@@ -202,22 +188,22 @@ BURGER_POST_STACK_PAUSE_S = 0.5
 # FOV for each align step is independently tunable.
 # ---------------------------------------------------------------------------
 # Turns: 1-3 are right (negative), 4-5 are left (positive)
-MOV2_TURN_1_DEG    = -102.0   # right: exit burger area → start nav corridor
+MOV2_TURN_1_DEG    = -98.0   # right: exit burger area → start nav corridor
 MOV2_DRIVE_1_MM    = 1000.0    # drive after T1 align (spec line 2)
 MOV2_DRIVE_2_MM    = 2000.0    # drive before T2       (spec line 3)
 MOV2_TURN_2_DEG    = -90.0    # right turn 1
 MOV2_DRIVE_3_MM    = 450.0   # drive before T3       (spec line 4)
-MOV2_TURN_3_DEG    = -98.0    # right turn 2
-MOV2_DRIVE_4_MM    = 3000.0    # drive before T4       (spec line 5)
-MOV2_TURN_4_DEG    = 93.0     # left: switch to right wall
+MOV2_TURN_3_DEG    = -90.0    # right turn 2
+MOV2_DRIVE_4_MM    = 4000.0    # drive before T4       (spec line 5)
+MOV2_TURN_4_DEG    = 90.0     # left: switch to right wall
 MOV2_DRIVE_5_MM    = 700.0    # final drive           (spec line 6)
 MOV2_TURN_5_DEG    = 90.0     # left: final heading correction
-MOV2_ALIGN_LEFT_FOV  = 70.0   # FOV for all left-wall parallel aligns
-MOV2_ALIGN_RIGHT_FOV = 70.0   # FOV for all right-wall parallel aligns
+MOV2_ALIGN_LEFT_FOV  = 60.0   # FOV for all left-wall parallel aligns
+MOV2_ALIGN_RIGHT_FOV = 60.0   # FOV for all right-wall parallel aligns
 MOV2_VELOCITY_MM_S   = 120.0
 MOV2_TOLERANCE_MM    = 20.0
 MOV2_DRIVE_TIMEOUT_S = 30.0
-MOV2_APPROACH_VEL_MM_S = 100.0        # slow speed for the DRIVE_2 wall-standoff approach
+MOV2_APPROACH_VEL_MM_S = 60.0        # slow speed for the DRIVE_2 wall-standoff approach
 MOV2_APPROACH_2_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_2_MM)
 MOV2_APPROACH_3_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_3_MM)
 MOV2_APPROACH_4_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_4_MM)
@@ -229,13 +215,13 @@ MOV2_TURN_TOLERANCE_DEG     = 3.0
 # ---------------------------------------------------------------------------
 # Obstacle avoidance (LAPF)
 # ---------------------------------------------------------------------------
-LAPF_GOAL = (1000.0, 3200.0)   # world-frame goal (mm)
+LAPF_GOAL = (900.0, 3200.0)   # world-frame goal (mm)
 LAPF_VELOCITY_MM_S      = 60.0
 LAPF_TOLERANCE_MM       = 50.0
 LAPF_MAX_ANGULAR_RAD_S  = 1.0
 LAPF_LEASH_LENGTH_MM    = 50.0
 LAPF_LEASH_HALF_ANGLE_DEG = 25.0
-LAPF_REPULSION_RANGE_MM = 325.0
+LAPF_REPULSION_RANGE_MM = 340.0
 LAPF_REPULSION_GAIN     = 550.0
 LAPF_ATTRACTION_GAIN    = 1.0
 LAPF_TARGET_SPEED_MM_S  = 200.0
@@ -799,23 +785,6 @@ def prime_lift(robot: Robot) -> None:
     time.sleep(GRIPPER_SETTLE_S)
 
 
-def simulate_carry(robot: Robot) -> None:
-    """TEST harness: mimic holding the assembled burger.
-
-    prime_lift already raised the lift to carry and opened the gripper; here we
-    just close the gripper on the (hand-loaded) burger so the later drop-off
-    release is a real open. Keeps the lift at carry height.
-    """
-    global _LIFT_LOGICAL_STEPS
-    robot.enable_servo(GRIPPER_SERVO)
-    robot.step_enable(LIFT_STEPPER)
-    if _LIFT_LOGICAL_STEPS != LIFT_CARRY_STEPS:
-        move_lift_to(robot, LIFT_CARRY_STEPS)
-    robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_BUN_DEG)
-    time.sleep(GRIPPER_SETTLE_S)
-    print(f'[TEST] simulate_carry — lift at carry ({LIFT_CARRY_STEPS}), gripper closed on burger')
-
-
 # ---------------------------------------------------------------------------
 # Manipulation helper (blocking)
 # ---------------------------------------------------------------------------
@@ -937,16 +906,13 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 reset_mission(robot)
                 robot.set_led(LED.ORANGE, 0)
                 robot.set_led(LED.GREEN, 200)
-                # TEST HARNESS: skip traffic-light / MOV1 / burger and jump
-                # straight to the post-burger sequence (MOV2 onward) so it can be
-                # tuned in isolation. MOV2 is relative (relative turns + lidar
-                # wall aligns), so the reset odometry heading is fine — just place
-                # the robot where it would be when the burger sub-FSM finishes,
-                # facing forward and ready for the MOV2_TURN_1 (−98°) turn.
-                if TEST_SIMULATE_CARRY:
-                    simulate_carry(robot)
-                print('[TEST] jumping to post-burger — MOV2_TURN_1')
-                state = 'MOV2_TURN_1'
+                print(f'[FSM] TL_TURN_LEFT — turning {LOOK_LEFT_DEG:.0f}° left')
+                motion_handle = _start_turn_to(
+                    robot,
+                    robot.get_pose()[2] + LOOK_LEFT_DEG,
+                    max_angular=TL_TURN_MAX_ANGULAR_RAD_S,
+                )
+                state = 'TL_TURN_LEFT'
 
         # ===================================================================
         # TRAFFIC LIGHT
