@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import signal
 import threading
 
@@ -15,7 +16,15 @@ class RobotNode(Node):
     def __init__(self) -> None:
         super().__init__("robot")
         self.robot = Robot(self)
-        self.get_logger().info("robot node ready")
+        # Which mission module to run. Default is the canonical robot.main; the
+        # segment-test launch files override this to a harness module so you can
+        # `ros2 launch robot <seg>_test.launch.py` without cp-ing over main.py.
+        self.declare_parameter("mission_module", "robot.main")
+        self.mission_module = (
+            self.get_parameter("mission_module").get_parameter_value().string_value
+            or "robot.main"
+        )
+        self.get_logger().info(f"robot node ready (mission_module={self.mission_module})")
 
 
 def _safe_log(node: Node, level: str, message: str) -> None:
@@ -49,8 +58,8 @@ def main(args=None) -> None:
     signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
 
     try:
-        from robot.main import run
-        run(node.robot)
+        mission = importlib.import_module(node.mission_module)
+        mission.run(node.robot)
     except KeyboardInterrupt:
         _safe_log(node, "info", "robot node interrupted; shutting down")
     finally:
