@@ -52,15 +52,19 @@ A modular two-wheeled mobile robot platform designed for hands-on robotics educa
 
 ## Current Mission Behavior (`ros2_ws/src/robot/robot/main.py`)
 
-The robot node ships with a five-state FSM that demonstrates the full sensing → planning → control stack:
+`main.py` runs the full competition mission FSM (started on `BTN_1`, `BTN_2` cancels to `IDLE` at any stage):
 
-1. **IDLE** — orange LED; press `BTN_1` to start (`BTN_2` cancels at any stage).
-2. **LOOK_LEFT** — turns `LOOK_LEFT_OFFSET_DEG` (default 40°) CCW from the initial heading so the camera faces the traffic light.
-3. **WATCHING** — blue LED; polls `/vision/detections` for a `traffic light` detection whose `color = green` and `confidence ≥ MIN_TRAFFIC_LIGHT_CONFIDENCE` (default 0.50). Detections older than `VISION_STALE_SEC` (3 s) are ignored.
-4. **TURN_BACK** — green LED; rotates back to `INITIAL_THETA_DEG` (90°).
-5. **MOVING** — follows `PATH_CONTROL_POINTS` with pure pursuit (`purepursuit_follow_path`).
+1. **IDLE** — orange LED; primes the lift to carry height and opens the gripper.
+2. **Traffic light** — turn to face the light, wait for green, turn back.
+3. **MOV1** — drive to the patty shelf.
+4. **Burger assembly** — 4 shelf stops (patty / left bun / right bun / stack) with per-stop turn, forward-wall square, standoff approach, and lift manipulation.
+5. **MOV2** — scripted corridor (relative turns + lidar parallel-wall aligns + wall-standoff approaches), ending with a final left turn and an **odometry reset**.
+6. **LAPF** — `robot.lapf_to_goal(LAPF_GOAL)` through the cone field; the goal is robot-relative (straight ahead) thanks to the pre-LAPF reset.
+7. **MOV3 → Gender ID → MOV4** — square/approach the wall, read the person's gender, drive a gender-dependent distance to the drop-off.
+8. **Drop-off** — place the burger, re-square, then the stop-sign leg.
+9. **Stop sign** — drive until the sign is detected, creep a fixed distance, stop and wait, then a final drive to **DONE**.
 
-Tune via the constants block near the top of `main.py`. Hardware constants (wheel diameter, wheel base, motor IDs) come from `ros2_ws/src/robot/robot/hardware_map.py`.
+The full state-by-state breakdown lives in [CLAUDE.md](CLAUDE.md). Tune via the constants block near the top of `main.py`. Hardware constants (wheel diameter, wheel base, motor IDs) come from `ros2_ws/src/robot/robot/hardware_map.py`.
 
 ## Technologies
 

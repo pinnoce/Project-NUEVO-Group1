@@ -167,7 +167,7 @@ def to_step_config(data: dict, stamp: Time) -> StepConfig:
 def to_step_state_all(data: dict, stamp: Time) -> StepStateAll:
     msg = StepStateAll()
     msg.header = _header(stamp)
-    for index, item in enumerate(data.get("steppers", [])[:4]):
+    for item in data.get("steppers", [])[:4]:
         stepper = StepperState()
         stepper.stepper_number = int(item["stepperNumber"])
         stepper.enabled = bool(item["enabled"])
@@ -177,7 +177,15 @@ def to_step_state_all(data: dict, stamp: Time) -> StepStateAll:
         stepper.target_count = int(item["targetCount"])
         stepper.current_speed = int(item["currentSpeed"])
         stepper.timestamp = int(item.get("timestamp", 0))
-        msg.steppers[index] = stepper
+        # Index by stepper number, NOT firmware payload order. The firmware does
+        # not emit steppers in natural 1..4 order (this robot leads with stepper
+        # 4), and every consumer reads steppers[stepper_id - 1]. Filling by
+        # enumeration order put stepper 4's (always-idle) state at index 0, so
+        # _wait_stepper_idle on the lift (STEPPER_1) never saw it go active and
+        # timed out every move. Keep this keyed by number.
+        idx = stepper.stepper_number - 1
+        if 0 <= idx < len(msg.steppers):
+            msg.steppers[idx] = stepper
     return msg
 
 
@@ -196,12 +204,16 @@ def to_servo_state_all(data: dict, stamp: Time) -> ServoStateAll:
                     enabled_mask |= 1 << (channel_number - 1)
     msg.enabled_mask = int(enabled_mask)
     msg.timestamp = int(data.get("timestamp", 0))
-    for index, item in enumerate(data.get("channels", [])[:16]):
+    for item in data.get("channels", [])[:16]:
         channel = ServoChannelState()
         channel.channel_number = int(item["channelNumber"])
         channel.enabled = bool(item["enabled"])
         channel.pulse_us = int(item["pulseUs"])
-        msg.channels[index] = channel
+        # Index by channel number, not payload order — same latent bug as the
+        # stepper array above. Consumers read channels[channel_number - 1].
+        idx = channel.channel_number - 1
+        if 0 <= idx < len(msg.channels):
+            msg.channels[idx] = channel
     return msg
 
 

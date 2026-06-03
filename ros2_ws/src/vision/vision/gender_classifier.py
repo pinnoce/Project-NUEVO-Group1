@@ -30,7 +30,7 @@ class GenderNcnnClassifier:
         model_path: str | Path,
         input_size: int = 224,
         ncnn_threads: int = 0,
-        female_threshold: float = 0.25, # lower this to make "female" stickier against frame-to-frame jitter; raise to require more confidence
+        female_threshold: float = 0.20, # lower this to make "female" stickier against frame-to-frame jitter; raise to require more confidence
     ) -> None:
         self.model_path = Path(model_path).expanduser()
         self.input_size = int(input_size)

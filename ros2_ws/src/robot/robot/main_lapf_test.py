@@ -125,7 +125,8 @@ LIFT_STEPPER          = Stepper.STEPPER_1
 LIFT_DIR_INVERTED     = True    # positive logical steps = upward
 LIFT_MAX_VELOCITY     = 2000
 LIFT_ACCELERATION     = 2000
-LIFT_MOVE_TIMEOUT_S   = 20.0
+LIFT_MOVE_TIMEOUT_S   = 30.0    # headroom for a slow lift if boot config was dropped
+LIFT_CONFIG_SETTLE_S  = 0.15    # let step_set_config land before the first move
 
 # Logical heights in steps.  Step 0 = shelf surface (boot position).
 BUN_HEIGHT_STEPS      = 11000
@@ -208,7 +209,7 @@ MOV2_TURN_3_DEG    = -90.0    # right turn 2
 MOV2_DRIVE_4_MM    = 3000.0    # drive before T4       (spec line 5)
 MOV2_TURN_4_DEG    = 90.0     # left: switch to right wall
 MOV2_DRIVE_5_MM    = 700.0    # final drive           (spec line 6)
-MOV2_TURN_5_DEG    = 90.0     # left: final heading correction
+MOV2_TURN_5_DEG    = 90.0     # left: final heading correction before LAPF
 MOV2_ALIGN_LEFT_FOV  = 40.0   # FOV for all left-wall parallel aligns
 MOV2_ALIGN_RIGHT_FOV = 40.0   # FOV for all right-wall parallel aligns
 MOV2_VELOCITY_MM_S   = 120.0
@@ -226,7 +227,7 @@ MOV2_TURN_TOLERANCE_DEG     = 3.0
 # ---------------------------------------------------------------------------
 # Obstacle avoidance (LAPF)
 # ---------------------------------------------------------------------------
-LAPF_GOAL = (1000.0, 3200.0)   # world-frame goal (mm)
+LAPF_GOAL = (0.0, 3200.0)   # robot-relative goal: odom is reset to (0,0,90°) right before LAPF, so this is straight ahead
 LAPF_VELOCITY_MM_S      = 60.0
 LAPF_TOLERANCE_MM       = 50.0
 LAPF_MAX_ANGULAR_RAD_S  = 1.0
@@ -307,6 +308,7 @@ DROP_POST_RELEASE_PAUSE_S = 0.5
 # ---------------------------------------------------------------------------
 MIN_STOP_SIGN_CONFIDENCE = 0.92   # YOLO detection confidence threshold (adjustable)
 STOP_SIGN_VEL_MM_S      = 80.0
+STOP_SIGN_APPROACH_MM   = 300.0    # after first seeing the sign, drive this far, THEN stop
 STOP_SIGN_WAIT_S        = 3.0
 STOP_SIGN_FINAL_MM      = 1000.0   # drive this far after the stop
 STOP_SIGN_VEL_FINAL_MM_S = 100.0
@@ -344,6 +346,22 @@ _detected_gender: tuple | None = None  # (label, score) from vision, set during 
 
 def _lift_signed(steps: int) -> int:
     return -int(steps) if LIFT_DIR_INVERTED else int(steps)
+
+
+def apply_lift_config(robot: Robot) -> None:
+    """Re-send the lift step config while the firmware is live.
+
+    configure_robot sends step_set_config in the boot window, before the
+    bridge<->firmware link is up (the same window that drops set_odometry_parameters),
+    so it is silently lost and the lift runs at the slow firmware default — a
+    LIFT_CARRY move then takes longer than LIFT_MOVE_TIMEOUT_S and move_lift_to
+    returns False even though the lift is moving fine. Re-apply after step_enable
+    (post-RUNNING) so the config actually takes. See [[lift_config_boot_race]].
+    """
+    robot.step_set_config(
+        LIFT_STEPPER, max_velocity=LIFT_MAX_VELOCITY, acceleration=LIFT_ACCELERATION,
+    )
+    time.sleep(LIFT_CONFIG_SETTLE_S)
 
 
 def move_lift_to(robot: Robot, target_steps: int, timeout: float = LIFT_MOVE_TIMEOUT_S) -> bool:
@@ -790,6 +808,7 @@ def prime_lift(robot: Robot) -> None:
     # set RUNNING, so this enable always takes effect. See [[lift_config_boot_race]].
     robot.enable_servo(GRIPPER_SERVO)
     robot.step_enable(LIFT_STEPPER)
+    apply_lift_config(robot)
     if not move_lift_to(robot, LIFT_CARRY_STEPS):
         print('[warn] lift failed to reach carry height at start')
     robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)
@@ -1568,25 +1587,15 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 abort_to_idle(robot, motion_handle, 'cancelled MOV2 D5'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
-                _pause_until = now + MOV2_PAUSE_LONG_S; _after_pause = 'MOV2_ALIGN_RIGHT_2'; state = 'PAUSING'
-
-        elif state == 'MOV2_ALIGN_RIGHT_2':
-            if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled MOV2 AR2'); motion_handle = None; state = 'IDLE'
-            elif motion_handle is not None:
-                if motion_handle.is_finished(): motion_handle = None
-            else:
-                if _align_started_at == 0.0: _align_started_at = now; _align_iters = 0
-                corr = side_wall_correction_deg(robot, MOV2_ALIGN_RIGHT_FOV, 'right')
-                if corr is None:
-                    if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
-                        _align_started_at = 0.0; state = 'MOV2_TURN_5'
-                elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or _align_iters >= WALL_ALIGN_MAX_ITERS:
-                    _align_started_at = 0.0; state = 'MOV2_TURN_5'
-                else:
-                    _align_iters += 1; motion_handle = _start_turn_to(robot, robot.get_pose()[2] + corr)
+                # MOV2_ALIGN_RIGHT_2 removed (redundant) — it re-squared to the
+                # same right wall as MOV2_ALIGN_RIGHT_1 after a short straight
+                # MOV2_DRIVE_5, so go straight to the final turn.
+                _pause_until = now + MOV2_PAUSE_LONG_S; _after_pause = 'MOV2_TURN_5'; state = 'PAUSING'
 
         elif state == 'MOV2_TURN_5':
+            # Explicit final left turn before LAPF. LAPF's own opening pivot was
+            # too sluggish here (rear-wheel drive + short leash), so pre-orient
+            # the robot up the lane before handing off to LAPF.
             _align_started_at = 0.0
             heading = robot.get_pose()[2] + MOV2_TURN_5_DEG
             print(f'[FSM] MOV2 TURN 5 — {MOV2_TURN_5_DEG:+.0f}°')
@@ -1598,6 +1607,14 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 abort_to_idle(robot, motion_handle, 'cancelled MOV2 T5'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
+                # Reset odometry now that the robot is physically pointed up the
+                # lane. This zeroes accumulated drift so LAPF's goal is reckoned
+                # from a fresh (0,0,90°) frame — LAPF_GOAL=(0,3200) then sits
+                # straight ahead. Everything downstream of LAPF is lidar-relative,
+                # so a mid-mission reset is safe here.
+                robot.reset_odometry()
+                if not robot.wait_for_odometry_reset(timeout=2.0):
+                    print('[warn] odometry reset before LAPF not confirmed within 2s')
                 _pause_until = now + MOV2_PAUSE_LONG_S; _after_pause = 'LAPF_RUN'; state = 'PAUSING'
 
         # ===================================================================
@@ -1957,14 +1974,29 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 robot.stop(); abort_to_idle(robot, None, 'cancelled STOP drive'); state = 'IDLE'
             elif _see_stop_sign(robot):
                 robot.stop()
-                print(f'[FSM] STOP SIGN detected — waiting {STOP_SIGN_WAIT_S:.1f}s')
-                _pause_until = now + STOP_SIGN_WAIT_S; _after_pause = 'STOP_FINAL_DRIVE'; state = 'PAUSING'
+                print(f'[FSM] STOP SIGN detected — driving {STOP_SIGN_APPROACH_MM:.0f} mm before stop')
+                state = 'STOP_APPROACH'
             elif now - _approach_started_at > STOP_SIGN_TIMEOUT_S:
                 robot.stop()
                 print('[STOP] timeout — no stop sign, proceeding')
                 _pause_until = now + STOP_SIGN_WAIT_S; _after_pause = 'STOP_FINAL_DRIVE'; state = 'PAUSING'
             else:
                 robot.set_velocity(STOP_SIGN_VEL_MM_S, 0.0)
+
+        elif state == 'STOP_APPROACH':
+            # Stop sign read: keep driving STOP_SIGN_APPROACH_MM, then stop + wait.
+            motion_handle = _start_drive(robot, STOP_SIGN_APPROACH_MM, STOP_SIGN_VEL_MM_S,
+                                         STOP_SIGN_TOLERANCE_MM, timeout=15.0)
+            state = 'STOP_APPROACH_WAIT'
+
+        elif state == 'STOP_APPROACH_WAIT':
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, 'cancelled STOP approach'); motion_handle = None; state = 'IDLE'
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                robot.stop()
+                print(f'[FSM] STOP — stopped, waiting {STOP_SIGN_WAIT_S:.1f}s')
+                _pause_until = now + STOP_SIGN_WAIT_S; _after_pause = 'STOP_FINAL_DRIVE'; state = 'PAUSING'
 
         elif state == 'STOP_FINAL_DRIVE':
             print(f'[FSM] STOP final drive — {STOP_SIGN_FINAL_MM:.0f} mm')
