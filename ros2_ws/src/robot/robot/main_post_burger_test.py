@@ -203,40 +203,40 @@ BURGER_POST_STACK_PAUSE_S = 0.5
 # FOV for each align step is independently tunable.
 # ---------------------------------------------------------------------------
 # Turns: 1-3 are right (negative), 4-5 are left (positive)
-MOV2_TURN_1_DEG    = -98.0   # right: exit burger area → start nav corridor
-MOV2_DRIVE_1_MM    = 1000.0    # drive after T1 align (spec line 2)
-MOV2_DRIVE_2_MM    = 1200.0    # drive before T2       (spec line 3)
+MOV2_TURN_1_DEG    = -100.0   # right: exit burger area → start nav corridor
+MOV2_DRIVE_1_MM    = 400.0    # drive after T1 align (spec line 2)
+MOV2_DRIVE_2_MM    = 2500.0    # drive before T2       (spec line 3)
 MOV2_TURN_2_DEG    = -90.0    # right turn 1
-MOV2_DRIVE_3_MM    = 450.0   # drive before T3       (spec line 4)
-MOV2_TURN_3_DEG    = -90.0    # right turn 2
-MOV2_DRIVE_4_MM    = 3000.0    # drive before T4       (spec line 5)
-MOV2_TURN_4_DEG    = 90.0     # left: switch to right wall
+MOV2_DRIVE_3_MM    = 1000   # drive before T3       (spec line 4)
+MOV2_TURN_3_DEG    = -98.0    # right turn 2
+MOV2_DRIVE_4_MM    = 3500.0    # drive before T4       (spec line 5)
+MOV2_TURN_4_DEG    = 93.0     # left: switch to right wall
 MOV2_DRIVE_5_MM    = 700.0    # final drive           (spec line 6)
-MOV2_TURN_5_DEG    = 90.0     # left: final heading correction before LAPF
-MOV2_ALIGN_LEFT_FOV  = 40.0   # FOV for all left-wall parallel aligns
-MOV2_ALIGN_RIGHT_FOV = 40.0   # FOV for all right-wall parallel aligns
+MOV2_TURN_5_DEG    = 91.0     # left: final heading correction before LAPF
+MOV2_ALIGN_LEFT_FOV  = 70.0   # FOV for all left-wall parallel aligns
+MOV2_ALIGN_RIGHT_FOV = 70.0   # FOV for all right-wall parallel aligns
 MOV2_VELOCITY_MM_S   = 120.0
 MOV2_TOLERANCE_MM    = 20.0
 MOV2_DRIVE_TIMEOUT_S = 30.0
-MOV2_APPROACH_VEL_MM_S = 60.0        # slow speed for the DRIVE_2 wall-standoff approach
+MOV2_APPROACH_VEL_MM_S = 100.0        # slow speed for the DRIVE_2 wall-standoff approach
 MOV2_APPROACH_2_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_2_MM)
-MOV2_APPROACH_3_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_3_MM)
+MOV2_APPROACH_3_STANDOFF_MM = 180.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_3_MM)
 MOV2_APPROACH_4_STANDOFF_MM = 150.0  # stop this far from the forward wall (replaces fixed MOV2_DRIVE_4_MM)
 MOV2_PAUSE_SHORT_S   = 0.25
 MOV2_PAUSE_LONG_S    = 0.5
 MOV2_TURN_MAX_ANGULAR_RAD_S = 1.2
-MOV2_TURN_TOLERANCE_DEG     = 3.0
+MOV2_TURN_TOLERANCE_DEG     = 2.0
 
 # ---------------------------------------------------------------------------
 # Obstacle avoidance (LAPF)
 # ---------------------------------------------------------------------------
-LAPF_GOAL = (0.0, 3200.0)   # robot-relative goal: odom is reset to (0,0,90°) right before LAPF, so this is straight ahead
+LAPF_GOAL = (-200.0, 2830.0)   # robot-relative goal: odom is reset to (0,0,90°) right before LAPF, so this is straight ahead
 LAPF_VELOCITY_MM_S      = 60.0
 LAPF_TOLERANCE_MM       = 50.0
 LAPF_MAX_ANGULAR_RAD_S  = 1.0
 LAPF_LEASH_LENGTH_MM    = 50.0
 LAPF_LEASH_HALF_ANGLE_DEG = 25.0
-LAPF_REPULSION_RANGE_MM = 325.0
+LAPF_REPULSION_RANGE_MM = 335.0
 LAPF_REPULSION_GAIN     = 550.0
 LAPF_ATTRACTION_GAIN    = 1.0
 LAPF_TARGET_SPEED_MM_S  = 200.0
@@ -256,28 +256,28 @@ MOV3_TURN_DEG           = -92.0  # right turn after wall approach
 MOV3_TURN_MAX_ANGULAR_RAD_S = 1.0
 MOV3_TURN_TOLERANCE_DEG = 3.0
 MOV3_ALIGN_PARA_FOV     = 60.0   # FOV for parallel left-wall alignment
-MOV3_DRIVE_MM           = 700.0
+MOV3_DRIVE_MM           = 200.0
 MOV3_VELOCITY_MM_S      = 120.0
 MOV3_TOLERANCE_MM       = 20.0
 MOV3_DRIVE_TIMEOUT_S    = 30.0
-MOV3_POST_DRIVE_PAUSE_S = 4.0
+MOV3_POST_DRIVE_PAUSE_S = 8.0
 
 # ---------------------------------------------------------------------------
 # Gender identification
 # ---------------------------------------------------------------------------
-MIN_PERSON_CONFIDENCE = 0.35
+MIN_PERSON_CONFIDENCE = 0.20
 
 # ---------------------------------------------------------------------------
 # Moving 4
 # ---------------------------------------------------------------------------
 MOV4_ALIGN_PERP_FOV     = 20.0
-MOV4_WALL_STANDOFF_MM   = 185.0
-MOV4_APPROACH_VEL_MM_S  = 60.0
+MOV4_WALL_STANDOFF_MM   = 195.0
+MOV4_APPROACH_VEL_MM_S  = 50.0
 MOV4_APPROACH_MAX_MM    = 2500.0
 MOV4_APPROACH_TIMEOUT_S = 30.0
 MOV4_TURN_DEG           = -90.0  # right turn
 MOV4_TURN_MAX_ANGULAR_RAD_S = 1.0
-MOV4_TURN_TOLERANCE_DEG = 3.0
+MOV4_TURN_TOLERANCE_DEG = 2.0
 MOV4_ALIGN_PARA_FOV     = 60.0
 MOV4_DRIVE_1_MM         = 500.0  # first parallel-corrected drive
 MOV4_VELOCITY_MM_S      = 120.0
@@ -291,14 +291,14 @@ MOV4_DRIVE_MALE_MM      = 2050.0
 # ---------------------------------------------------------------------------
 # Burger drop-off
 # ---------------------------------------------------------------------------
-DROP_SHELF_TURN_DEG     = 92.0    # CCW (left) from current heading to face shelf
+DROP_SHELF_TURN_DEG     = 93.0    # CCW (left) from current heading to face shelf
 DROP_SHELF_ALIGN_FOV    = 40.0
 DROP_SHELF_STANDOFF_MM  = 290.0
 DROP_APPROACH_VEL_MM_S  = 40.0
 DROP_APPROACH_MAX_MM    = 300.0
 DROP_APPROACH_TIMEOUT_S = 20.0
 DROP_LIFT_PLACE_STEPS   = 0       # lower to shelf surface for release
-DROP_RETREAT_MM         = 200.0
+DROP_RETREAT_MM         = 180.0
 DROP_TURN_BACK_DEG      = -92.0   # CW (right) to return to travel heading
 DROP_TURN_BACK_ALIGN_FOV = 60.0   # FOV half-angle for the lidar parallel-left heading fix after turn-back
 DROP_TRAVEL_VEL_MM_S    = 80.0
@@ -309,11 +309,11 @@ DROP_POST_RELEASE_PAUSE_S = 0.5
 # ---------------------------------------------------------------------------
 # Stop sign
 # ---------------------------------------------------------------------------
-MIN_STOP_SIGN_CONFIDENCE = 0.92   # YOLO detection confidence threshold (adjustable)
+MIN_STOP_SIGN_CONFIDENCE = 0.89   # YOLO detection confidence threshold (adjustable)
 STOP_SIGN_VEL_MM_S      = 80.0
 STOP_SIGN_APPROACH_MM   = 300.0    # after first seeing the sign, drive this far, THEN stop
 STOP_SIGN_WAIT_S        = 3.0
-STOP_SIGN_FINAL_MM      = 1000.0   # drive this far after the stop
+STOP_SIGN_FINAL_MM      = 800.0   # drive this far after the stop
 STOP_SIGN_VEL_FINAL_MM_S = 100.0
 STOP_SIGN_TOLERANCE_MM  = 20.0
 STOP_SIGN_TIMEOUT_S     = 30.0
@@ -1624,7 +1624,16 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
         # OBSTACLE AVOIDANCE — LAPF
         # ===================================================================
         elif state == 'LAPF_RUN':
-            print(f'[FSM] LAPF — navigating to goal {LAPF_GOAL}')
+            # --- diagnostic: why does LAPF steer where it does at onset? ---
+            _px, _py, _pth = robot.get_pose()
+            _bearing = math.degrees(math.atan2(LAPF_GOAL[1] - _py, LAPF_GOAL[0] - _px))
+            _herr = (_bearing - _pth + 180.0) % 360.0 - 180.0   # +left / -right of heading
+            _obs = robot.get_obstacles()
+            _left = min((o for o in _obs if o[1] > 0), key=lambda o: o[0]**2 + o[1]**2, default=None)
+            _right = min((o for o in _obs if o[1] < 0), key=lambda o: o[0]**2 + o[1]**2, default=None)
+            print(f'[FSM] LAPF — goal {LAPF_GOAL} pose=({_px:.0f},{_py:.0f},{_pth:.0f}°) '
+                  f'goal_bearing={_bearing:.0f}° heading_err={_herr:+.0f}° '
+                  f'(>0 goal-left / <0 goal-right)  nearest_left={_left} nearest_right={_right}')
             motion_handle = robot.lapf_to_goal(
                 LAPF_GOAL[0], LAPF_GOAL[1],
                 velocity=LAPF_VELOCITY_MM_S,
