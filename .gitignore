@@ -12,7 +12,6 @@ plugins/
 .agents/
 .plugins/
 openspec/
-CLAUDE.md
 AGENTS.md
 
 # ============================================
