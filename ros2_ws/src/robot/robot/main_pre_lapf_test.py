@@ -1,5 +1,5 @@
 """
-new_main.py — Full competition FSM
+main.py — Full competition FSM
 ====================================
 Mission sequence (BTN_2 cancels at any stage):
 
@@ -1579,7 +1579,7 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 motion_handle = None
                 # Reset odometry now that the robot is physically pointed up the
                 # lane. This zeroes accumulated drift so LAPF's goal is reckoned
-                # from a fresh (0,0,90°) frame — LAPF_GOAL=(0,3200) then sits
+                # from a fresh (0,0,90°) frame — LAPF_GOAL=(0,2700) then sits
                 # straight ahead. Everything downstream of LAPF is lidar-relative,
                 # so a mid-mission reset is safe here.
                 robot.reset_odometry()

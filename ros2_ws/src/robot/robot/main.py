@@ -1,5 +1,5 @@
 """
-new_main.py — Full competition FSM
+main.py — Full competition FSM
 ====================================
 Mission sequence (BTN_2 cancels at any stage):
 
@@ -132,7 +132,7 @@ LIFT_STACK_PICK_STEPS      = 0                                # lower to shelf s
 # Burger assembly — shelf approach
 # ---------------------------------------------------------------------------
 SHELF_APPROACH_VEL_MM_S     = 40.0
-SHELF_STANDOFF_MM           = 290.0   # stop when nearest forward point ≤ this
+SHELF_STANDOFF_MM           = 295.0   # stop when nearest forward point ≤ this
 SHELF_APPROACH_FOV_HALF_DEG = 10.0    # narrow forward cone for approach distance
 SHELF_APPROACH_MAX_DIST_MM  = 300.0   # safety cap on approach distance
 SHELF_APPROACH_TIMEOUT_S    = 20.0
@@ -166,11 +166,11 @@ SHELF_TURN_TOLERANCE_DEG     = 2.0
 # ---------------------------------------------------------------------------
 INTER_TURN_DEG = [
     97.0,    # patty → LB: turn ~82° CCW to face backward, then drive
-    -105.0,   # LB → RB: turn ~98° CW to face forward, then drive
+    -120.0,   # LB → RB: turn ~98° CW to face forward, then drive
     97.0,    # RB → Stack: turn ~82° CCW to face backward, then drive
 ]
 INTER_DRIVE_MM = [
-    137.0,   # patty → LB (traveling backward along shelf = positive forward)
+    148.0,   # patty → LB (traveling backward along shelf = positive forward)
     309.0,   # LB → RB (traveling forward along shelf)
     304.0,   # RB → Stack (traveling backward = positive forward in backward heading)
 ]
@@ -1579,7 +1579,7 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 motion_handle = None
                 # Reset odometry now that the robot is physically pointed up the
                 # lane. This zeroes accumulated drift so LAPF's goal is reckoned
-                # from a fresh (0,0,90°) frame — LAPF_GOAL=(0,3200) then sits
+                # from a fresh (0,0,90°) frame — LAPF_GOAL=(0,2700) then sits
                 # straight ahead. Everything downstream of LAPF is lidar-relative,
                 # so a mid-mission reset is safe here.
                 robot.reset_odometry()

@@ -117,7 +117,7 @@ def simulate_lidar(px, py, theta_deg):
 
 def fit_wall_line(pts, fov_half_deg, fov_center_deg):
     """
-    PCA line fit identical to new_main.py.
+    PCA line fit identical to main.py.
     Returns (correction_deg, phi_deg, cx, cy) or None on failure.
     correction_deg = how much robot should turn (CCW+) to align.
     """
