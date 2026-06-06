@@ -149,7 +149,10 @@ SHELF_APPROACH_TIMEOUT_S    = 20.0
 LIDAR_FILTER_MIN_MM         = 25.0    # overrides hardware_map for this run
 RETREAT_FROM_SHELF_MM       = 210.0
 
-# Per-stop shelf turn: heading = INITIAL_THETA_DEG + offset (CCW = positive = left)
+# Per-stop shelf FACING offset (deg, CCW+). _shelf_turn_rel() converts these into a
+# RELATIVE turn so the shelf turns assume no absolute-odom frame (drift-free); the
+# per-stop BUR_n_ALIGN lidar square then removes any residual. Tune to aim the rough
+# facing — the lidar does the final perpendicular square.
 SHELF_TURN_OFFSETS_DEG = [
     94.0,   # 0: patty
     98.0,   # 1: left bun
@@ -166,6 +169,11 @@ SHELF_ALIGN_FOV_DEG = [
 ]
 
 SHELF_TURN_MAX_ANGULAR_RAD_S = 1.4
+# The stack (BUR_3) shelf turn is the largest + fastest in-place turn, so at
+# 1.4 rad/s the wheels break traction and odometry over-counts the rotation —
+# the turn controller hits its tolerance in odometry while the chassis is still
+# short, then jumps into BUR_3_ALIGN under-rotated. Spin it slower to keep grip.
+STACK_TURN_MAX_ANGULAR_RAD_S = 0.6
 SHELF_TURN_TOLERANCE_DEG     = 2.0
 
 # ---------------------------------------------------------------------------
@@ -185,6 +193,12 @@ INTER_DRIVE_MM = [
     304.0,   # RB → Stack (traveling backward = positive forward in backward heading)
 ]
 INTER_PAUSE_S = 0.25
+
+# Extra lidar parallel re-square after the LB→RB turn (INTER_TURN_DEG[1]).
+# That -120° turn slips on the floor, so re-square heading to the shelf
+# (left) wall before the 309 mm drive so the leg tracks straight to the
+# right-bun stop.
+BUR_TRAVEL_12_ALIGN_FOV = 60.0   # side-wall FOV half-angle (deg)
 
 BURGER_TRAVEL_VEL_MM_S  = 80.0
 BURGER_TRAVEL_TOL_MM    = 15.0
@@ -680,10 +694,25 @@ def _start_turn_to(robot: Robot, heading_deg: float, max_angular: float = WALL_A
                          max_angular_rad_s=max_angular)
 
 
-def _start_shelf_turn(robot: Robot, heading_deg: float) -> object:
+def _start_shelf_turn(robot: Robot, heading_deg: float,
+                      max_angular: float = SHELF_TURN_MAX_ANGULAR_RAD_S) -> object:
     return robot.turn_to(heading_deg, blocking=False,
                          tolerance_deg=SHELF_TURN_TOLERANCE_DEG,
-                         max_angular_rad_s=SHELF_TURN_MAX_ANGULAR_RAD_S)
+                         max_angular_rad_s=max_angular)
+
+
+def _shelf_turn_rel(i: int) -> float:
+    """Relative turn (deg, CCW+) to roughly face the shelf at stop i.
+
+    Derived from the per-stop facing offsets and the travel turn that preceded the
+    stop, so it assumes NO absolute odometry frame (drift-free):
+        rel[0] = OFFSET[0]                               (from forward after MOV1)
+        rel[i] = (OFFSET[i] - OFFSET[i-1]) - INTER_TURN_DEG[i-1]
+    BUR_i_ALIGN's lidar perpendicular-square removes any residual after the turn.
+    """
+    if i == 0:
+        return SHELF_TURN_OFFSETS_DEG[0]
+    return (SHELF_TURN_OFFSETS_DEG[i] - SHELF_TURN_OFFSETS_DEG[i - 1]) - INTER_TURN_DEG[i - 1]
 
 
 def _start_drive(robot: Robot, dist_mm: float, vel: float, tol: float, timeout: float) -> object:
@@ -979,10 +1008,10 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
             elif _see_green_light(robot):
                 print('[FSM] GREEN LIGHT detected')
                 robot.set_led(LED.BLUE, 0)
-                print(f'[FSM] TL_TURN_BACK — returning to θ={INITIAL_THETA_DEG:.0f}°')
+                print(f'[FSM] TL_TURN_BACK — turning {-LOOK_LEFT_DEG:+.0f}° back to forward (relative)')
                 motion_handle = _start_turn_to(
                     robot,
-                    INITIAL_THETA_DEG,
+                    robot.get_pose()[2] - LOOK_LEFT_DEG,
                     max_angular=TL_TURN_MAX_ANGULAR_RAD_S,
                 )
                 state = 'TL_TURN_BACK'
@@ -1027,9 +1056,9 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
         # BURGER ASSEMBLY — Stop 0: PATTY
         # ===================================================================
         elif state == 'BUR_0_TURN':
-            _shelf_heading = INITIAL_THETA_DEG + SHELF_TURN_OFFSETS_DEG[0]
-            print(f'[FSM] BUR_0 — turn to shelf heading {_shelf_heading:.0f}°')
-            motion_handle = _start_shelf_turn(robot, _shelf_heading)
+            _rel = _shelf_turn_rel(0)
+            print(f'[FSM] BUR_0 — turn {_rel:+.0f}° to face shelf (relative)')
+            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
             state = 'BUR_0_TURN_WAIT'
 
         elif state == 'BUR_0_TURN_WAIT':
@@ -1124,9 +1153,9 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
         # BURGER ASSEMBLY — Stop 1: LEFT BUN
         # ===================================================================
         elif state == 'BUR_1_TURN':
-            _shelf_heading = INITIAL_THETA_DEG + SHELF_TURN_OFFSETS_DEG[1]
-            print(f'[FSM] BUR_1 — turn to shelf heading {_shelf_heading:.0f}°')
-            motion_handle = _start_shelf_turn(robot, _shelf_heading)
+            _rel = _shelf_turn_rel(1)
+            print(f'[FSM] BUR_1 — turn {_rel:+.0f}° to face shelf (relative)')
+            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
             state = 'BUR_1_TURN_WAIT'
 
         elif state == 'BUR_1_TURN_WAIT':
@@ -1194,7 +1223,29 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 abort_to_idle(robot, motion_handle, 'cancelled travel 1→2'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
-                _pause_until = now + INTER_PAUSE_S; _after_pause = 'BUR_TRAVEL_12_DRIVE'; state = 'PAUSING'
+                _align_started_at = 0.0
+                _pause_until = now + INTER_PAUSE_S; _after_pause = 'BUR_TRAVEL_12_ALIGN'; state = 'PAUSING'
+
+        elif state == 'BUR_TRAVEL_12_ALIGN':
+            # Re-square heading to the shelf (left) wall after INTER_TURN_DEG[1].
+            # That -120° turn slips on the floor; squaring here before the drive
+            # keeps the 309 mm leg tracking straight along the shelf.
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, 'cancelled travel 1→2 align'); motion_handle = None; state = 'IDLE'
+            elif motion_handle is not None:
+                if motion_handle.is_finished(): motion_handle = None
+            else:
+                if _align_started_at == 0.0: _align_started_at = now; _align_iters = 0
+                corr = side_wall_correction_deg(robot, BUR_TRAVEL_12_ALIGN_FOV, 'left')
+                if corr is None:
+                    if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
+                        print('[ALIGN] BUR travel 1→2: no fit, proceeding')
+                        _align_started_at = 0.0; state = 'BUR_TRAVEL_12_DRIVE'
+                elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or _align_iters >= WALL_ALIGN_MAX_ITERS:
+                    print(f'[ALIGN] BUR travel 1→2 done ({corr:+.1f}°)')
+                    _align_started_at = 0.0; state = 'BUR_TRAVEL_12_DRIVE'
+                else:
+                    _align_iters += 1; motion_handle = _start_turn_to(robot, robot.get_pose()[2] + corr)
 
         elif state == 'BUR_TRAVEL_12_DRIVE':
             motion_handle = _start_drive(robot, INTER_DRIVE_MM[1], BURGER_TRAVEL_VEL_MM_S,
@@ -1211,9 +1262,9 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
         # BURGER ASSEMBLY — Stop 2: RIGHT BUN
         # ===================================================================
         elif state == 'BUR_2_TURN':
-            _shelf_heading = INITIAL_THETA_DEG + SHELF_TURN_OFFSETS_DEG[2]
-            print(f'[FSM] BUR_2 — turn to shelf heading {_shelf_heading:.0f}°')
-            motion_handle = _start_shelf_turn(robot, _shelf_heading)
+            _rel = _shelf_turn_rel(2)
+            print(f'[FSM] BUR_2 — turn {_rel:+.0f}° to face shelf (relative)')
+            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
             state = 'BUR_2_TURN_WAIT'
 
         elif state == 'BUR_2_TURN_WAIT':
@@ -1294,9 +1345,9 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
         # BURGER ASSEMBLY — Stop 3: STACK PLACE + PICK FULL BURGER
         # ===================================================================
         elif state == 'BUR_3_TURN':
-            _shelf_heading = INITIAL_THETA_DEG + SHELF_TURN_OFFSETS_DEG[3]
-            print(f'[FSM] BUR_3 (stack) — turn to shelf heading {_shelf_heading:.0f}°')
-            motion_handle = _start_shelf_turn(robot, _shelf_heading)
+            _rel = _shelf_turn_rel(3)
+            print(f'[FSM] BUR_3 (stack) — turn {_rel:+.0f}° to face shelf (relative)')
+            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel, max_angular=STACK_TURN_MAX_ANGULAR_RAD_S)
             state = 'BUR_3_TURN_WAIT'
 
         elif state == 'BUR_3_TURN_WAIT':
