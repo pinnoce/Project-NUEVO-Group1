@@ -57,7 +57,7 @@ A modular two-wheeled mobile robot platform designed for hands-on robotics educa
 1. **IDLE** — orange LED; primes the lift to carry height and opens the gripper.
 2. **Traffic light** — turn to face the light, wait for green, turn back.
 3. **MOV1** — drive to the patty shelf.
-4. **Burger assembly** — 4 shelf stops (patty / left bun / right bun / stack) with per-stop turn, forward-wall square, standoff approach, and lift manipulation.
+4. **Burger assembly** — 3 shelf stops in order left bun → patty → right bun, each with turn-to-face, forward-wall square, standoff approach, lift manipulation (build bottom-up bun→patty→bun), retreat, turn-back, and parallel re-square.
 5. **MOV2** — scripted corridor (relative turns + lidar parallel-wall aligns + wall-standoff approaches), ending with a final left turn and an **odometry reset**.
 6. **LAPF** — `robot.lapf_to_goal(LAPF_GOAL)` through the cone field; the goal is robot-relative (straight ahead) thanks to the pre-LAPF reset.
 7. **MOV3 → Gender ID → MOV4** — square/approach the wall, read the person's gender, drive a gender-dependent distance to the drop-off.
