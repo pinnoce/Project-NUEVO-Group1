@@ -168,7 +168,7 @@ The shipped `main.py` runs this sequence on `BTN_1` (with `BTN_2` cancelling to 
 
 (The older `main_post_burger_test.py` and `main_lapf_test.py` siblings carried stale tuning and were removed; these three LAPF-segment harnesses are the only test siblings.)
 
-**Caveat (2026-06-06):** the burger sub-FSM in `main.py` was rewritten to the 3-stop order, but the harness siblings were **not** updated — they still contain the old 4-stop patty-first burger. So `main_pre_lapf_test.py` (which runs the real burger) has diverged from `main.py` and no longer diffs cleanly; re-sync the burger section into the harnesses before relying on them.
+**Note (2026-06-06):** when the burger sub-FSM was rewritten to the 3-stop order, all three harness siblings were re-synced from the new `main.py` so they diff cleanly again (verified: each is `main.py` + only its IDLE jump / `simulate_carry` / SEG redirect). The re-sync also reset the harnesses' drifted tuning back to `main.py`'s values (`GRIPPER_CLOSE_PATTY_DEG`, `LIFT_MAX_VELOCITY`/`LIFT_ACCELERATION`, `SHELF_STANDOFF_MM`) — re-tune in `main.py` and re-sync rather than letting the harnesses drift.
 
 **Launching a segment without `cp`:** `robot_node.py` takes a `mission_module` ROS param (default `robot.main`) and dynamically imports `run()` from it; `everything.launch.py` forwards a `mission_module` launch arg to the node (still bringing up rplidar + sensors + vision). Three thin launch files set it: `ros2 launch robot pre_lapf_test.launch.py` / `lapf_only_test.launch.py` / `post_lapf_test.launch.py`. (New launch files need a colcon rebuild to register in `share/robot/launch`.)
 
