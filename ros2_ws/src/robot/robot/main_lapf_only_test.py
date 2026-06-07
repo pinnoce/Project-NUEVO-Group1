@@ -5,8 +5,8 @@ Mission sequence (BTN_2 cancels at any stage):
 
   IDLE               → wait for BTN_1, raise lift to carry and open gripper
   TRAFFIC_LIGHT      → turn left 30°, wait for green light, turn back
-  MOVING_1           → drive forward to the left-bun position
-  BURGER_ASSEMBLY    → 3 shelf stops: left-bun pick, patty stack, right-bun stack+pick
+  MOVING_1           → drive forward to patty position
+  BURGER_ASSEMBLY    → 4 shelf stops: patty pick, LB place, RB pick, stack+pick
   MOVING_2           → scripted navigation with lidar-parallel corrections
   OBSTACLE_AVOIDANCE → LAPF through cone field
   MOVING_3           → perpendicular wall approach, turn, parallel, drive
@@ -91,9 +91,9 @@ MIN_TRAFFIC_LIGHT_CONFIDENCE = 0.50
 MIN_GREEN_COLOR_CONFIDENCE = 0.07
 
 # ---------------------------------------------------------------------------
-# Moving 1 — drive to the LEFT BUN (first burger stop)
+# Moving 1 — drive to patty
 # ---------------------------------------------------------------------------
-MOV1_DISTANCE_MM   = 1065.0    # forward distance to reach the left-bun position (RE-TUNE)
+MOV1_DISTANCE_MM   = 1170.0    # forward distance to reach patty position
 MOV1_VELOCITY_MM_S = 120.0
 MOV1_TOLERANCE_MM  = 20.0
 MOV1_PAUSE_S       = 0.5
@@ -113,7 +113,7 @@ TEST_SIMULATE_CARRY = True   # on BTN_1, raise lift to carry + close gripper to 
 # ---------------------------------------------------------------------------
 GRIPPER_SERVO           = ServoChannel.CH_1
 GRIPPER_OPEN_DEG        = 0.0
-GRIPPER_CLOSE_PATTY_DEG = 97.0   # tighter for patty
+GRIPPER_CLOSE_PATTY_DEG = 95.0   # tighter for patty
 GRIPPER_CLOSE_BUN_DEG   = 85.0   # looser for bun or full stack
 GRIPPER_SETTLE_S        = 0.8
 
@@ -122,8 +122,8 @@ GRIPPER_SETTLE_S        = 0.8
 # ---------------------------------------------------------------------------
 LIFT_STEPPER          = Stepper.STEPPER_1
 LIFT_DIR_INVERTED     = True    # positive logical steps = upward
-LIFT_MAX_VELOCITY     = 3500
-LIFT_ACCELERATION     = 2500
+LIFT_MAX_VELOCITY     = 2500
+LIFT_ACCELERATION     = 2000
 LIFT_MOVE_TIMEOUT_S   = 30.0    # headroom for a slow lift if boot config was dropped
 LIFT_CONFIG_SETTLE_S  = 0.15    # let step_set_config land before the first move
 
@@ -132,50 +132,73 @@ BUN_HEIGHT_STEPS      = 11000
 PATTY_HEIGHT_STEPS    = 11000
 LIFT_CARRY_STEPS      = 20000   # safe travel height
 
-# New assembly order: LEFT BUN → PATTY (dropped onto bun) → RIGHT BUN (stacked onto it).
-LIFT_SHELF_STEPS       = 0                   # shelf surface — pick the bottom layer here
-LIFT_PATTY_PLACE_STEPS = PATTY_HEIGHT_STEPS  # drop the held bun so its base sits on the patty top
-LIFT_RB_PLACE_STEPS    = BUN_HEIGHT_STEPS    # drop the held patty+bun so it sits on the right bun
+LIFT_PATTY_PICK_STEPS      = 0                                # lower to shelf surface
+LIFT_LB_PLACE_STEPS        = BUN_HEIGHT_STEPS                 # lower onto bun top
+LIFT_RB_PICK_STEPS         = 0                                # lower to shelf surface
+LIFT_STACK_PLACE_STEPS     = BUN_HEIGHT_STEPS + PATTY_HEIGHT_STEPS  # top of full stack
+LIFT_STACK_PICK_STEPS      = 0                                # lower to shelf surface
 
 # ---------------------------------------------------------------------------
 # Burger assembly — shelf approach
 # ---------------------------------------------------------------------------
 SHELF_APPROACH_VEL_MM_S     = 40.0
-SHELF_STANDOFF_MM           = 295.0   # stop when nearest forward point ≤ this
+SHELF_STANDOFF_MM           = 290.0   # stop when nearest forward point ≤ this
 SHELF_APPROACH_FOV_HALF_DEG = 10.0    # narrow forward cone for approach distance
 SHELF_APPROACH_MAX_DIST_MM  = 300.0   # safety cap on approach distance
 SHELF_APPROACH_TIMEOUT_S    = 20.0
 LIDAR_FILTER_MIN_MM         = 25.0    # overrides hardware_map for this run
-RETREAT_FROM_SHELF_MM       = 200.0
+RETREAT_FROM_SHELF_MM       = 210.0
 
-# ---------------------------------------------------------------------------
-# Burger assembly — 3-stop sequence (LEFT BUN → PATTY → RIGHT BUN), indexed [0,1,2]
-#
-# Per stop the robot:
-#   1. turns LEFT  (BUR_FACE_TURN_DEG[i]) to face the shelf
-#   2. squares perpendicular to the shelf with the lidar (forward-wall fit,
-#      FOV half-angle BUR_PERP_FOV_DEG[i])
-#   3. drives forward to SHELF_STANDOFF_MM
-#   4. manipulates (pick bun / stack patty / stack right bun)
-#   5. retreats BUR_RETREAT_MM[i] mm straight back
-#   6. turns RIGHT (BUR_UNFACE_TURN_DEG[i]) back to the travel heading
-#   7. re-squares PARALLEL to the shelf (left wall, FOV BUR_PARA_FOV_DEG[i])
-#   8. drives forward BUR_TRAVEL_MM[i] mm to line up beside the next item
-#      (the last stop has no travel — it hands off to MOV2)
-#
-# Turns are RELATIVE (drift-free); the lidar squares remove any residual.
-# ---------------------------------------------------------------------------
-BUR_FACE_TURN_DEG   = [90.0, 90.0, 90.0]     # CCW+ turn to face the shelf at each stop
-BUR_UNFACE_TURN_DEG = [-90.0, -90.0, -90.0]  # CW turn back to travel heading after each stop
-BUR_PERP_FOV_DEG    = [20.0, 20.0, 20.0]     # forward-wall square FOV half-angle per stop
-BUR_PARA_FOV_DEG    = [70.0, 70.0, 70.0]     # parallel left-wall square FOV half-angle per stop
-BUR_RETREAT_MM      = [200.0, 200.0, 200.0]  # straight-back retreat after each stop
-BUR_TRAVEL_MM       = [275.0, 325.0]         # forward travel LB→patty, patty→RB (last stop: none)
+# Per-stop shelf FACING offset (deg, CCW+). _shelf_turn_rel() converts these into a
+# RELATIVE turn so the shelf turns assume no absolute-odom frame (drift-free); the
+# per-stop BUR_n_ALIGN lidar square then removes any residual. Tune to aim the rough
+# facing — the lidar does the final perpendicular square.
+SHELF_TURN_OFFSETS_DEG = [
+    94.0,   # 0: patty
+    98.0,   # 1: left bun
+    97.0,   # 2: right bun
+    95.0,   # 3: stack
+]
+
+# Per-stop lidar FOV half-angle for perpendicular alignment
+SHELF_ALIGN_FOV_DEG = [
+    20.0,   # 0: patty
+    10.0,   # 1: left bun
+    20.0,   # 2: right bun
+    10.0,   # 3: stack
+]
 
 SHELF_TURN_MAX_ANGULAR_RAD_S = 1.4
+# The stack (BUR_3) shelf turn is the largest + fastest in-place turn, so at
+# 1.4 rad/s the wheels break traction and odometry over-counts the rotation —
+# the turn controller hits its tolerance in odometry while the chassis is still
+# short, then jumps into BUR_3_ALIGN under-rotated. Spin it slower to keep grip.
+STACK_TURN_MAX_ANGULAR_RAD_S = 0.6
 SHELF_TURN_TOLERANCE_DEG     = 2.0
 
+# ---------------------------------------------------------------------------
+# Burger inter-stop travel (signed: + = forward, - = backward in user heading)
+# After retreating from stop i, robot turns to a travel heading then drives.
+# INTER_TURN_DEG[i] = relative turn from current heading to travel heading.
+# INTER_DRIVE_MM[i] = signed distance to drive.
+# ---------------------------------------------------------------------------
+INTER_TURN_DEG = [
+    97.0,    # patty → LB: turn ~82° CCW to face backward, then drive
+    -105.0,   # LB → RB: turn ~98° CW to face forward, then drive
+    97.0,    # RB → Stack: turn ~82° CCW to face backward, then drive
+]
+INTER_DRIVE_MM = [
+    137.0,   # patty → LB (traveling backward along shelf = positive forward)
+    309.0,   # LB → RB (traveling forward along shelf)
+    304.0,   # RB → Stack (traveling backward = positive forward in backward heading)
+]
 INTER_PAUSE_S = 0.25
+
+# Extra lidar parallel re-square after the LB→RB turn (INTER_TURN_DEG[1]).
+# That -120° turn slips on the floor, so re-square heading to the shelf
+# (left) wall before the 309 mm drive so the leg tracks straight to the
+# right-bun stop.
+BUR_TRAVEL_12_ALIGN_FOV = 60.0   # side-wall FOV half-angle (deg)
 
 BURGER_TRAVEL_VEL_MM_S  = 80.0
 BURGER_TRAVEL_TOL_MM    = 15.0
@@ -190,7 +213,7 @@ BURGER_POST_STACK_PAUSE_S = 0.5
 # FOV for each align step is independently tunable.
 # ---------------------------------------------------------------------------
 # Turns: 1-3 are right (negative), 4-5 are left (positive)
-MOV2_TURN_1_DEG    = 0.0   # right: exit burger area → start nav corridor
+MOV2_TURN_1_DEG    = -100.0   # right: exit burger area → start nav corridor
 MOV2_DRIVE_1_MM    = 400.0    # drive after T1 align (spec line 2)
 MOV2_DRIVE_2_MM    = 2500.0    # drive before T2       (spec line 3)
 MOV2_TURN_2_DEG    = -90.0    # right turn 1
@@ -678,6 +701,20 @@ def _start_shelf_turn(robot: Robot, heading_deg: float,
                          max_angular_rad_s=max_angular)
 
 
+def _shelf_turn_rel(i: int) -> float:
+    """Relative turn (deg, CCW+) to roughly face the shelf at stop i.
+
+    Derived from the per-stop facing offsets and the travel turn that preceded the
+    stop, so it assumes NO absolute odometry frame (drift-free):
+        rel[0] = OFFSET[0]                               (from forward after MOV1)
+        rel[i] = (OFFSET[i] - OFFSET[i-1]) - INTER_TURN_DEG[i-1]
+    BUR_i_ALIGN's lidar perpendicular-square removes any residual after the turn.
+    """
+    if i == 0:
+        return SHELF_TURN_OFFSETS_DEG[0]
+    return (SHELF_TURN_OFFSETS_DEG[i] - SHELF_TURN_OFFSETS_DEG[i - 1]) - INTER_TURN_DEG[i - 1]
+
+
 def _start_drive(robot: Robot, dist_mm: float, vel: float, tol: float, timeout: float) -> object:
     if dist_mm >= 0.0:
         return robot.move_forward(dist_mm, velocity=vel, tolerance=tol, blocking=False, timeout=timeout)
@@ -807,6 +844,23 @@ def prime_lift(robot: Robot) -> None:
     time.sleep(GRIPPER_SETTLE_S)
 
 
+def simulate_carry(robot: Robot) -> None:
+    """TEST harness: mimic holding the assembled burger.
+
+    prime_lift already raised the lift to carry and opened the gripper; here we
+    just close the gripper on the (hand-loaded) burger so the later drop-off
+    release is a real open. Keeps the lift at carry height.
+    """
+    global _LIFT_LOGICAL_STEPS
+    robot.enable_servo(GRIPPER_SERVO)
+    robot.step_enable(LIFT_STEPPER)
+    if _LIFT_LOGICAL_STEPS != LIFT_CARRY_STEPS:
+        move_lift_to(robot, LIFT_CARRY_STEPS)
+    robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_BUN_DEG)
+    time.sleep(GRIPPER_SETTLE_S)
+    print(f'[TEST] simulate_carry - lift at carry ({LIFT_CARRY_STEPS}), gripper closed on burger')
+
+
 # ---------------------------------------------------------------------------
 # Manipulation helper (blocking)
 # ---------------------------------------------------------------------------
@@ -829,42 +883,22 @@ def _place(robot: Robot, lift_steps: int) -> bool:
     return move_lift_to(robot, LIFT_CARRY_STEPS)
 
 
-def _place_layer_then_pick(robot: Robot, place_steps: int, grip_deg: float) -> bool:
-    """Add the currently held layer to the shelf item, then pick up the combined stack.
+def _stack_place_then_pick(robot: Robot) -> bool:
+    """BUR_3 only: lower→open→lower→close→raise without intermediate raise.
 
-    Used at the patty and right-bun stops, where the gripper is already holding
-    something. Sequence (no intermediate raise):
-      raise to place_steps → open (the held layer settles onto the shelf item
-      below it) → lower to the shelf surface → close at grip_deg (now gripping
-      the whole stack) → raise to carry.
+    Spec: lower to bun+patty height → open (release top bun) →
+          lower to shelf surface → close (grip full burger) → raise to carry.
     """
-    if not move_lift_to(robot, place_steps):
+    if not move_lift_to(robot, LIFT_STACK_PLACE_STEPS):
         return False
     robot.set_servo(GRIPPER_SERVO, GRIPPER_OPEN_DEG)
     time.sleep(GRIPPER_SETTLE_S)
     # go straight down to shelf — no intermediate raise
-    if not move_lift_to(robot, LIFT_SHELF_STEPS):
+    if not move_lift_to(robot, LIFT_STACK_PICK_STEPS):
         return False
-    robot.set_servo(GRIPPER_SERVO, grip_deg)
-    time.sleep(GRIPPER_SETTLE_S)
-    return move_lift_to(robot, LIFT_CARRY_STEPS)
-
-
-def simulate_carry(robot: Robot) -> None:
-    """TEST harness: mimic holding the assembled burger.
-
-    prime_lift already raised the lift to carry and opened the gripper; here we
-    just close the gripper on the (hand-loaded) burger so the later drop-off
-    release is a real open. Keeps the lift at carry height.
-    """
-    global _LIFT_LOGICAL_STEPS
-    robot.enable_servo(GRIPPER_SERVO)
-    robot.step_enable(LIFT_STEPPER)
-    if _LIFT_LOGICAL_STEPS != LIFT_CARRY_STEPS:
-        move_lift_to(robot, LIFT_CARRY_STEPS)
     robot.set_servo(GRIPPER_SERVO, GRIPPER_CLOSE_BUN_DEG)
     time.sleep(GRIPPER_SETTLE_S)
-    print(f'[TEST] simulate_carry - lift at carry ({LIFT_CARRY_STEPS}), gripper closed on burger')
+    return move_lift_to(robot, LIFT_CARRY_STEPS)
 
 
 def _retreat(robot: Robot, dist_mm: float) -> None:
@@ -1019,13 +1053,11 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 state = 'PAUSING'
 
         # ===================================================================
-        # BURGER ASSEMBLY — Stop 0: LEFT BUN (pick from shelf)
-        #   turn left → square perp → approach → pick bun → retreat →
-        #   turn right → square parallel → drive beside the patty
+        # BURGER ASSEMBLY — Stop 0: PATTY
         # ===================================================================
         elif state == 'BUR_0_TURN':
-            _rel = BUR_FACE_TURN_DEG[0]
-            print(f'[FSM] BUR_0 (left bun) — turn {_rel:+.0f}° to face shelf (relative)')
+            _rel = _shelf_turn_rel(0)
+            print(f'[FSM] BUR_0 — turn {_rel:+.0f}° to face shelf (relative)')
             motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
             state = 'BUR_0_TURN_WAIT'
 
@@ -1049,7 +1081,7 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                 if motion_handle.is_finished():
                     motion_handle = None
             else:
-                corr = forward_wall_correction_deg(robot, BUR_PERP_FOV_DEG[0])
+                corr = forward_wall_correction_deg(robot, SHELF_ALIGN_FOV_DEG[0])
                 if corr is None:
                     if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
                         print('[ALIGN] BUR_0: no fit, proceeding')
@@ -1078,68 +1110,51 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                         now - _approach_started_at > SHELF_APPROACH_TIMEOUT_S:
                     robot.stop()
                     print(f'[FSM] BUR_0 approach done — dist={dist:.0f} adv={adv:.0f}')
-                    # BLOCKING: pick the left bun (empty gripper → shelf surface → grip → carry)
+                    # BLOCKING: pick patty + retreat
                     robot.step_enable(LIFT_STEPPER)
-                    if not _pick(robot, LIFT_SHELF_STEPS, GRIPPER_CLOSE_BUN_DEG):
+                    if not _pick(robot, LIFT_PATTY_PICK_STEPS, GRIPPER_CLOSE_PATTY_DEG):
                         abort_to_idle(robot, None, 'lift failed at BUR_0'); state = 'IDLE'
                     else:
-                        _retreat(robot, BUR_RETREAT_MM[0])
-                        state = 'BUR_0_TURN_BACK'
+                        _retreat(robot, RETREAT_FROM_SHELF_MM)
+                        state = 'BUR_TRAVEL_01_TURN'
                 else:
                     robot.set_velocity(SHELF_APPROACH_VEL_MM_S, 0.0)
 
-        elif state == 'BUR_0_TURN_BACK':
-            _rel = BUR_UNFACE_TURN_DEG[0]
-            print(f'[FSM] BUR_0 — turn back {_rel:+.0f}° to travel heading (relative)')
-            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
-            state = 'BUR_0_TURN_BACK_WAIT'
+        # ===================================================================
+        # BURGER ASSEMBLY — Travel 0→1: patty to left bun
+        # ===================================================================
+        elif state == 'BUR_TRAVEL_01_TURN':
+            heading = robot.get_pose()[2] + INTER_TURN_DEG[0]
+            print(f'[FSM] BUR TRAVEL 0→1 turn to {heading:.0f}°')
+            motion_handle = _start_turn_to(robot, heading, max_angular=SHELF_TURN_MAX_ANGULAR_RAD_S)
+            state = 'BUR_TRAVEL_01_TURN_WAIT'
 
-        elif state == 'BUR_0_TURN_BACK_WAIT':
+        elif state == 'BUR_TRAVEL_01_TURN_WAIT':
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_0 turn-back'); motion_handle = None; state = 'IDLE'
+                abort_to_idle(robot, motion_handle, 'cancelled travel 0→1'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
-                _align_started_at = 0.0
-                _pause_until = now + INTER_PAUSE_S; _after_pause = 'BUR_0_PARA'; state = 'PAUSING'
+                _pause_until = now + INTER_PAUSE_S
+                _after_pause = 'BUR_TRAVEL_01_DRIVE'
+                state = 'PAUSING'
 
-        elif state == 'BUR_0_PARA':
-            if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_0 parallel'); motion_handle = None; state = 'IDLE'
-            elif motion_handle is not None:
-                if motion_handle.is_finished(): motion_handle = None
-            else:
-                if _align_started_at == 0.0: _align_started_at = now; _align_iters = 0
-                corr = side_wall_correction_deg(robot, BUR_PARA_FOV_DEG[0], 'left')
-                if corr is None:
-                    if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
-                        print('[ALIGN] BUR_0 parallel: no fit, proceeding')
-                        _align_started_at = 0.0; state = 'BUR_0_DRIVE'
-                elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or _align_iters >= WALL_ALIGN_MAX_ITERS:
-                    print(f'[ALIGN] BUR_0 parallel done ({corr:+.1f}°)')
-                    _align_started_at = 0.0; state = 'BUR_0_DRIVE'
-                else:
-                    _align_iters += 1; motion_handle = _start_turn_to(robot, robot.get_pose()[2] + corr)
-
-        elif state == 'BUR_0_DRIVE':
-            motion_handle = _start_drive(robot, BUR_TRAVEL_MM[0], BURGER_TRAVEL_VEL_MM_S,
+        elif state == 'BUR_TRAVEL_01_DRIVE':
+            motion_handle = _start_drive(robot, INTER_DRIVE_MM[0], BURGER_TRAVEL_VEL_MM_S,
                                          BURGER_TRAVEL_TOL_MM, BURGER_TRAVEL_TIMEOUT_S)
-            state = 'BUR_0_DRIVE_WAIT'
+            state = 'BUR_TRAVEL_01_DRIVE_WAIT'
 
-        elif state == 'BUR_0_DRIVE_WAIT':
+        elif state == 'BUR_TRAVEL_01_DRIVE_WAIT':
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_0 drive'); motion_handle = None; state = 'IDLE'
+                abort_to_idle(robot, motion_handle, 'cancelled drive 0→1'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None; state = 'BUR_1_TURN'
 
         # ===================================================================
-        # BURGER ASSEMBLY — Stop 1: PATTY (drop held bun onto patty, pick both)
-        #   turn left → square perp → approach → lift to patty height, open
-        #   (release bun onto patty), lower to shelf, close (grip patty+bun),
-        #   raise → retreat → turn right → square parallel → drive beside RB
+        # BURGER ASSEMBLY — Stop 1: LEFT BUN
         # ===================================================================
         elif state == 'BUR_1_TURN':
-            _rel = BUR_FACE_TURN_DEG[1]
-            print(f'[FSM] BUR_1 (patty) — turn {_rel:+.0f}° to face shelf (relative)')
+            _rel = _shelf_turn_rel(1)
+            print(f'[FSM] BUR_1 — turn {_rel:+.0f}° to face shelf (relative)')
             motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
             state = 'BUR_1_TURN_WAIT'
 
@@ -1149,7 +1164,9 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
                 _align_iters = 0; _align_started_at = now
-                _pause_until = now + 0.5; _after_pause = 'BUR_1_ALIGN'; state = 'PAUSING'
+                _pause_until = now + 0.5
+                _after_pause = 'BUR_1_ALIGN'
+                state = 'PAUSING'
 
         elif state == 'BUR_1_ALIGN':
             _plot_ctx['standoff_mm'] = SHELF_STANDOFF_MM
@@ -1158,7 +1175,7 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
             elif motion_handle is not None:
                 if motion_handle.is_finished(): motion_handle = None
             else:
-                corr = forward_wall_correction_deg(robot, BUR_PERP_FOV_DEG[1])
+                corr = forward_wall_correction_deg(robot, SHELF_ALIGN_FOV_DEG[1])
                 if corr is None:
                     if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
                         _align_started_at = 0.0; _approach_started_at = now
@@ -1168,7 +1185,8 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                     _align_started_at = 0.0; _approach_started_at = now
                     _approach_start_pose = robot.get_pose()[:2]; state = 'BUR_1_APPROACH'
                 else:
-                    _align_iters += 1; motion_handle = _start_turn_to(robot, robot.get_pose()[2] + corr)
+                    _align_iters += 1
+                    motion_handle = _start_turn_to(robot, robot.get_pose()[2] + corr)
 
         elif state == 'BUR_1_APPROACH':
             if robot.was_button_pressed(Button.BTN_2):
@@ -1181,69 +1199,71 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                         now - _approach_started_at > SHELF_APPROACH_TIMEOUT_S:
                     robot.stop()
                     print(f'[FSM] BUR_1 approach done — dist={dist:.0f} adv={adv:.0f}')
-                    # BLOCKING: drop held bun onto the patty, then pick patty+bun together
+                    # BLOCKING: place patty on left bun + retreat
                     robot.step_enable(LIFT_STEPPER)
-                    if not _place_layer_then_pick(robot, LIFT_PATTY_PLACE_STEPS, GRIPPER_CLOSE_PATTY_DEG):
+                    if not _place(robot, LIFT_LB_PLACE_STEPS):
                         abort_to_idle(robot, None, 'lift failed at BUR_1'); state = 'IDLE'
                     else:
-                        _retreat(robot, BUR_RETREAT_MM[1])
-                        state = 'BUR_1_TURN_BACK'
+                        _retreat(robot, RETREAT_FROM_SHELF_MM)
+                        state = 'BUR_TRAVEL_12_TURN'
                 else:
                     robot.set_velocity(SHELF_APPROACH_VEL_MM_S, 0.0)
 
-        elif state == 'BUR_1_TURN_BACK':
-            _rel = BUR_UNFACE_TURN_DEG[1]
-            print(f'[FSM] BUR_1 — turn back {_rel:+.0f}° to travel heading (relative)')
-            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
-            state = 'BUR_1_TURN_BACK_WAIT'
+        # ===================================================================
+        # BURGER ASSEMBLY — Travel 1→2: left bun to right bun
+        # ===================================================================
+        elif state == 'BUR_TRAVEL_12_TURN':
+            heading = robot.get_pose()[2] + INTER_TURN_DEG[1]
+            print(f'[FSM] BUR TRAVEL 1→2 turn to {heading:.0f}°')
+            motion_handle = _start_turn_to(robot, heading, max_angular=SHELF_TURN_MAX_ANGULAR_RAD_S)
+            state = 'BUR_TRAVEL_12_TURN_WAIT'
 
-        elif state == 'BUR_1_TURN_BACK_WAIT':
+        elif state == 'BUR_TRAVEL_12_TURN_WAIT':
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_1 turn-back'); motion_handle = None; state = 'IDLE'
+                abort_to_idle(robot, motion_handle, 'cancelled travel 1→2'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
                 _align_started_at = 0.0
-                _pause_until = now + INTER_PAUSE_S; _after_pause = 'BUR_1_PARA'; state = 'PAUSING'
+                _pause_until = now + INTER_PAUSE_S; _after_pause = 'BUR_TRAVEL_12_ALIGN'; state = 'PAUSING'
 
-        elif state == 'BUR_1_PARA':
+        elif state == 'BUR_TRAVEL_12_ALIGN':
+            # Re-square heading to the shelf (left) wall after INTER_TURN_DEG[1].
+            # That -120° turn slips on the floor; squaring here before the drive
+            # keeps the 309 mm leg tracking straight along the shelf.
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_1 parallel'); motion_handle = None; state = 'IDLE'
+                abort_to_idle(robot, motion_handle, 'cancelled travel 1→2 align'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None:
                 if motion_handle.is_finished(): motion_handle = None
             else:
                 if _align_started_at == 0.0: _align_started_at = now; _align_iters = 0
-                corr = side_wall_correction_deg(robot, BUR_PARA_FOV_DEG[1], 'left')
+                corr = side_wall_correction_deg(robot, BUR_TRAVEL_12_ALIGN_FOV, 'left')
                 if corr is None:
                     if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
-                        print('[ALIGN] BUR_1 parallel: no fit, proceeding')
-                        _align_started_at = 0.0; state = 'BUR_1_DRIVE'
+                        print('[ALIGN] BUR travel 1→2: no fit, proceeding')
+                        _align_started_at = 0.0; state = 'BUR_TRAVEL_12_DRIVE'
                 elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or _align_iters >= WALL_ALIGN_MAX_ITERS:
-                    print(f'[ALIGN] BUR_1 parallel done ({corr:+.1f}°)')
-                    _align_started_at = 0.0; state = 'BUR_1_DRIVE'
+                    print(f'[ALIGN] BUR travel 1→2 done ({corr:+.1f}°)')
+                    _align_started_at = 0.0; state = 'BUR_TRAVEL_12_DRIVE'
                 else:
                     _align_iters += 1; motion_handle = _start_turn_to(robot, robot.get_pose()[2] + corr)
 
-        elif state == 'BUR_1_DRIVE':
-            motion_handle = _start_drive(robot, BUR_TRAVEL_MM[1], BURGER_TRAVEL_VEL_MM_S,
+        elif state == 'BUR_TRAVEL_12_DRIVE':
+            motion_handle = _start_drive(robot, INTER_DRIVE_MM[1], BURGER_TRAVEL_VEL_MM_S,
                                          BURGER_TRAVEL_TOL_MM, BURGER_TRAVEL_TIMEOUT_S)
-            state = 'BUR_1_DRIVE_WAIT'
+            state = 'BUR_TRAVEL_12_DRIVE_WAIT'
 
-        elif state == 'BUR_1_DRIVE_WAIT':
+        elif state == 'BUR_TRAVEL_12_DRIVE_WAIT':
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_1 drive'); motion_handle = None; state = 'IDLE'
+                abort_to_idle(robot, motion_handle, 'cancelled drive 1→2'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None; state = 'BUR_2_TURN'
 
         # ===================================================================
-        # BURGER ASSEMBLY — Stop 2: RIGHT BUN (drop patty+bun onto RB, pick burger)
-        #   turn left → square perp → approach → lift to bun height, open
-        #   (release patty+bun onto the right bun), lower to shelf, close
-        #   (grip whole burger), raise → retreat → turn right → square
-        #   parallel → hand off to MOV2 (no travel drive on the last stop)
+        # BURGER ASSEMBLY — Stop 2: RIGHT BUN
         # ===================================================================
         elif state == 'BUR_2_TURN':
-            _rel = BUR_FACE_TURN_DEG[2]
-            print(f'[FSM] BUR_2 (right bun) — turn {_rel:+.0f}° to face shelf (relative)')
+            _rel = _shelf_turn_rel(2)
+            print(f'[FSM] BUR_2 — turn {_rel:+.0f}° to face shelf (relative)')
             motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
             state = 'BUR_2_TURN_WAIT'
 
@@ -1262,7 +1282,7 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
             elif motion_handle is not None:
                 if motion_handle.is_finished(): motion_handle = None
             else:
-                corr = forward_wall_correction_deg(robot, BUR_PERP_FOV_DEG[2])
+                corr = forward_wall_correction_deg(robot, SHELF_ALIGN_FOV_DEG[2])
                 if corr is None:
                     if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
                         _align_started_at = 0.0; _approach_started_at = now
@@ -1285,54 +1305,101 @@ def run(robot: Robot) -> None:  # noqa: C901 (complexity)
                         now - _approach_started_at > SHELF_APPROACH_TIMEOUT_S:
                     robot.stop()
                     print(f'[FSM] BUR_2 approach done — dist={dist:.0f} adv={adv:.0f}')
-                    # BLOCKING: drop patty+bun onto the right bun, then pick the whole burger
                     robot.step_enable(LIFT_STEPPER)
-                    if not _place_layer_then_pick(robot, LIFT_RB_PLACE_STEPS, GRIPPER_CLOSE_BUN_DEG):
+                    if not _pick(robot, LIFT_RB_PICK_STEPS, GRIPPER_CLOSE_BUN_DEG):
                         abort_to_idle(robot, None, 'lift failed at BUR_2'); state = 'IDLE'
                     else:
-                        _retreat(robot, BUR_RETREAT_MM[2])
-                        state = 'BUR_2_TURN_BACK'
+                        _retreat(robot, RETREAT_FROM_SHELF_MM)
+                        state = 'BUR_TRAVEL_23_TURN'
                 else:
                     robot.set_velocity(SHELF_APPROACH_VEL_MM_S, 0.0)
 
-        elif state == 'BUR_2_TURN_BACK':
-            _rel = BUR_UNFACE_TURN_DEG[2]
-            print(f'[FSM] BUR_2 — turn back {_rel:+.0f}° to travel heading (relative)')
-            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel)
-            state = 'BUR_2_TURN_BACK_WAIT'
+        # ===================================================================
+        # BURGER ASSEMBLY — Travel 2→3: right bun back to stack (= LB position)
+        # ===================================================================
+        elif state == 'BUR_TRAVEL_23_TURN':
+            heading = robot.get_pose()[2] + INTER_TURN_DEG[2]
+            print(f'[FSM] BUR TRAVEL 2→3 turn to {heading:.0f}°')
+            motion_handle = _start_turn_to(robot, heading, max_angular=SHELF_TURN_MAX_ANGULAR_RAD_S)
+            state = 'BUR_TRAVEL_23_TURN_WAIT'
 
-        elif state == 'BUR_2_TURN_BACK_WAIT':
+        elif state == 'BUR_TRAVEL_23_TURN_WAIT':
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_2 turn-back'); motion_handle = None; state = 'IDLE'
+                abort_to_idle(robot, motion_handle, 'cancelled travel 2→3'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None and motion_handle.is_finished():
                 motion_handle = None
-                _align_started_at = 0.0
-                _pause_until = now + INTER_PAUSE_S; _after_pause = 'BUR_2_PARA'; state = 'PAUSING'
+                _pause_until = now + INTER_PAUSE_S; _after_pause = 'BUR_TRAVEL_23_DRIVE'; state = 'PAUSING'
 
-        elif state == 'BUR_2_PARA':
+        elif state == 'BUR_TRAVEL_23_DRIVE':
+            motion_handle = _start_drive(robot, INTER_DRIVE_MM[2], BURGER_TRAVEL_VEL_MM_S,
+                                         BURGER_TRAVEL_TOL_MM, BURGER_TRAVEL_TIMEOUT_S)
+            state = 'BUR_TRAVEL_23_DRIVE_WAIT'
+
+        elif state == 'BUR_TRAVEL_23_DRIVE_WAIT':
             if robot.was_button_pressed(Button.BTN_2):
-                abort_to_idle(robot, motion_handle, 'cancelled BUR_2 parallel'); motion_handle = None; state = 'IDLE'
+                abort_to_idle(robot, motion_handle, 'cancelled drive 2→3'); motion_handle = None; state = 'IDLE'
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None; state = 'BUR_3_TURN'
+
+        # ===================================================================
+        # BURGER ASSEMBLY — Stop 3: STACK PLACE + PICK FULL BURGER
+        # ===================================================================
+        elif state == 'BUR_3_TURN':
+            _rel = _shelf_turn_rel(3)
+            print(f'[FSM] BUR_3 (stack) — turn {_rel:+.0f}° to face shelf (relative)')
+            motion_handle = _start_shelf_turn(robot, robot.get_pose()[2] + _rel, max_angular=STACK_TURN_MAX_ANGULAR_RAD_S)
+            state = 'BUR_3_TURN_WAIT'
+
+        elif state == 'BUR_3_TURN_WAIT':
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, 'cancelled BUR_3 turn'); motion_handle = None; state = 'IDLE'
+            elif motion_handle is not None and motion_handle.is_finished():
+                motion_handle = None
+                _align_iters = 0; _align_started_at = now
+                _pause_until = now + 0.5; _after_pause = 'BUR_3_ALIGN'; state = 'PAUSING'
+
+        elif state == 'BUR_3_ALIGN':
+            _plot_ctx['standoff_mm'] = SHELF_STANDOFF_MM
+            if robot.was_button_pressed(Button.BTN_2):
+                abort_to_idle(robot, motion_handle, 'cancelled BUR_3 align'); motion_handle = None; state = 'IDLE'
             elif motion_handle is not None:
                 if motion_handle.is_finished(): motion_handle = None
             else:
-                if _align_started_at == 0.0: _align_started_at = now; _align_iters = 0
-                corr = side_wall_correction_deg(robot, BUR_PARA_FOV_DEG[2], 'left')
+                corr = forward_wall_correction_deg(robot, SHELF_ALIGN_FOV_DEG[3])
                 if corr is None:
                     if now - _align_started_at >= WALL_ALIGN_TIMEOUT_S:
-                        print('[ALIGN] BUR_2 parallel: no fit, proceeding')
-                        _align_started_at = 0.0
-                        # NOTE: the burger now ends PARALLEL to the shelf (shelf on
-                        # left), not facing it as the old stack stop did, so the
-                        # downstream MOV2_TURN_1_DEG geometry needs re-tuning.
-                        _pause_until = now + BURGER_POST_STACK_PAUSE_S
-                        _after_pause = 'MOV2_TURN_1'; state = 'PAUSING'
+                        _align_started_at = 0.0; _approach_started_at = now
+                        _approach_start_pose = robot.get_pose()[:2]; state = 'BUR_3_APPROACH'
                 elif abs(corr) <= WALL_ALIGN_TOLERANCE_DEG or _align_iters >= WALL_ALIGN_MAX_ITERS:
-                    print(f'[ALIGN] BUR_2 parallel done ({corr:+.1f}°)')
-                    _align_started_at = 0.0
-                    _pause_until = now + BURGER_POST_STACK_PAUSE_S
-                    _after_pause = 'MOV2_TURN_1'; state = 'PAUSING'
+                    print(f'[ALIGN] BUR_3 aligned ({corr:+.1f}°)')
+                    _align_started_at = 0.0; _approach_started_at = now
+                    _approach_start_pose = robot.get_pose()[:2]; state = 'BUR_3_APPROACH'
                 else:
                     _align_iters += 1; motion_handle = _start_turn_to(robot, robot.get_pose()[2] + corr)
+
+        elif state == 'BUR_3_APPROACH':
+            if robot.was_button_pressed(Button.BTN_2):
+                robot.stop(); abort_to_idle(robot, None, 'cancelled BUR_3 approach'); state = 'IDLE'
+            else:
+                dist = closest_forward_obstacle_mm(robot)
+                cur = robot.get_pose()[:2]
+                adv = math.hypot(cur[0] - _approach_start_pose[0], cur[1] - _approach_start_pose[1])
+                if dist <= SHELF_STANDOFF_MM or adv >= SHELF_APPROACH_MAX_DIST_MM or \
+                        now - _approach_started_at > SHELF_APPROACH_TIMEOUT_S:
+                    robot.stop()
+                    print(f'[FSM] BUR_3 approach done — dist={dist:.0f} adv={adv:.0f}')
+                    robot.step_enable(LIFT_STEPPER)
+                    # lower to bun+patty → open → lower to 0 → close → raise (no intermediate raise)
+                    ok = _stack_place_then_pick(robot)
+                    if not ok:
+                        abort_to_idle(robot, None, 'lift failed at BUR_3'); state = 'IDLE'
+                    else:
+                        _retreat(robot, RETREAT_FROM_SHELF_MM)
+                        _pause_until = now + BURGER_POST_STACK_PAUSE_S
+                        _after_pause = 'MOV2_TURN_1'
+                        state = 'PAUSING'
+                else:
+                    robot.set_velocity(SHELF_APPROACH_VEL_MM_S, 0.0)
 
         # ===================================================================
         # MOVING 2 — scripted route with lidar-parallel corrections
