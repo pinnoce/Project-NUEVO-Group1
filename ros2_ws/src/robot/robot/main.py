@@ -93,10 +93,10 @@ MIN_GREEN_COLOR_CONFIDENCE = 0.07
 # ---------------------------------------------------------------------------
 # Moving 1 — drive to patty
 # ---------------------------------------------------------------------------
-MOV1_DISTANCE_MM   = 1172.0    # forward distance to reach patty position
+MOV1_DISTANCE_MM   = 1152.0    # forward distance to reach patty position
 MOV1_VELOCITY_MM_S = 120.0
 MOV1_TOLERANCE_MM  = 20.0
-MOV1_PAUSE_S       = 0.5
+MOV1_PAUSE_S       = 0.25
 
 # ---------------------------------------------------------------------------
 # Gripper servo
