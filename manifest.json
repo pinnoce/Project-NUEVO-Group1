@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "course": "MAE 162D/E",
+  "year": 2026,
+  "section": "Yen",
+  "group": 1,
+  "title": "Autonomous Burger Robot",
+  "authors": ["Paolo Innocenzi", "Ian Dicks", "Jacob Jaramilla", "Silous Ramelli", "Lorenzo Cova", "Saul Escobedo"],
+  "summary": "A capstone project where we designed and built an autonomous burger assembly robot. Capable of identifying targets (traffic light, customer faces, stop sign), navigating obstacles, and travelling a circuit.",
+  "thumbnail": "assets/robot.png",
+  "keywords": ["YOLO 26 vision", "LiDAR", "Autonomous navigation", "ROS", "Burger assembly"]
+}
